@@ -10,10 +10,10 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '${up_revision}'
-down_revision = ${down_revision | comma,n}
-branch_labels = ${branch_labels | comma,n}
-depends_on = ${depends_on | comma,n}
+revision = ${repr(up_revision)}
+down_revision = ${repr(down_revision)}
+branch_labels = ${repr(branch_labels)}
+depends_on = ${repr(depends_on)}
 
 
 def upgrade() -> None:
