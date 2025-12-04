@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     DISCORD_CLIENT_SECRET: str = ""
     STEAM_API_KEY: str = ""
 
+    # Frontend
+    FRONTEND_URL: str = "http://localhost:3000"
+
     class Config:
         case_sensitive = True
         env_file = ".env"

@@ -12,3 +12,4 @@ httpx
 pytest
 ruff
 email-validator
+itsdangerous
