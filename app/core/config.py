@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+    # OAuth Providers
+    TWITCH_CLIENT_ID: str = ""
+    TWITCH_CLIENT_SECRET: str = ""
+    DISCORD_CLIENT_ID: str = ""
+    DISCORD_CLIENT_SECRET: str = ""
+    STEAM_API_KEY: str = ""
+
     class Config:
         case_sensitive = True
         env_file = ".env"

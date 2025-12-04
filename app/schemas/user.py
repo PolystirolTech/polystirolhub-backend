@@ -1,0 +1,46 @@
+from pydantic import BaseModel, EmailStr
+from typing import Optional
+from uuid import UUID
+from datetime import datetime
+
+class UserBase(BaseModel):
+    email: Optional[EmailStr] = None
+    username: Optional[str] = None
+    is_active: Optional[bool] = True
+
+class UserCreate(UserBase):
+    pass
+
+class UserUpdate(UserBase):
+    pass
+
+class UserInDBBase(UserBase):
+    id: UUID
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class User(UserInDBBase):
+    pass
+
+class UserInDB(UserInDBBase):
+    pass
+
+class OAuthAccountBase(BaseModel):
+    provider: str
+    provider_account_id: str
+    access_token: str
+    refresh_token: Optional[str] = None
+    expires_at: Optional[datetime] = None
+
+class OAuthAccountCreate(OAuthAccountBase):
+    pass
+
+class OAuthAccount(OAuthAccountBase):
+    id: UUID
+    user_id: UUID
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
