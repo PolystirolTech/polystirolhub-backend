@@ -93,10 +93,17 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_HOST} bash -s "$SERVER_PATH" << 'EOF'
             set -e
             SERVER_PATH="$1"
+            unset DOCKER_HOST
+            export DOCKER_HOST=unix:///var/run/docker.sock
             cd "$SERVER_PATH"
             
+            COMPOSE_CMD="docker-compose"
+            if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+              COMPOSE_CMD="docker compose"
+            fi
+            
             echo "Остановка старых контейнеров..."
-            docker-compose down || true
+            $COMPOSE_CMD down || true
             
             echo "Обновление кода..."
             git fetch origin
@@ -107,12 +114,11 @@ jobs:
             docker network create polystirolhub-network || true
             
             echo "Сборка и запуск контейнеров..."
-            docker-compose build --no-cache backend
-            docker-compose up -d
+            $COMPOSE_CMD build --no-cache backend
+            $COMPOSE_CMD up -d
             
             echo "Очистка старых образов..."
             docker image prune -f
             
             echo "Деплой завершен!"
           EOF
-          
