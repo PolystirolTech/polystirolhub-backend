@@ -12,6 +12,9 @@ from datetime import datetime, timedelta
 from urllib.parse import urlencode
 from itsdangerous import URLSafeTimedSerializer
 import secrets
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -153,6 +156,12 @@ async def callback(
             access_token = token_data["access_token"]
             refresh_token = token_data.get("refresh_token")
             expires_in = token_data.get("expires_in")
+            if expires_in is not None:
+                try:
+                    expires_in = int(expires_in)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid expires_in value: {expires_in}, treating as None")
+                    expires_in = None
             
             headers = {"Authorization": f"Bearer {access_token}"}
             if provider == "twitch":
@@ -235,6 +244,11 @@ async def callback(
             result = await db.execute(select(User).where(User.id == oauth_account.user_id))
             user = result.scalars().first()
             
+            if not user:
+                logger.error(f"OAuth account exists but user not found: user_id={oauth_account.user_id}")
+                error_params = urlencode({"error": "user_not_found"})
+                return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
+            
             oauth_account.access_token = access_token
             oauth_account.refresh_token = refresh_token
             if expires_in:
@@ -262,6 +276,12 @@ async def callback(
             db.add(new_oauth)
             await db.commit()
 
+        # Verify user exists before creating JWT
+        if not user:
+            logger.error("User is None after OAuth processing")
+            error_params = urlencode({"error": "user_creation_failed"})
+            return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
+
         # Create JWT and set as HTTP-only cookie
         access_token_jwt = create_access_token(subject=user.id)
         
@@ -280,6 +300,7 @@ async def callback(
         return response
         
     except Exception as e:
+        logger.exception(f"OAuth callback error for provider {provider}: {str(e)}")
         error_params = urlencode({"error": "server_error"})
         return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
 
