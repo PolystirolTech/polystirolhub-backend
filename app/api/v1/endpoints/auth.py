@@ -139,7 +139,8 @@ async def callback(
     redirect_uri = f"{settings.BACKEND_CORS_ORIGINS[1]}{settings.API_V1_STR}/auth/callback/{provider}"
     
     try:
-        async with httpx.AsyncClient() as client:
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(config["token_url"], data={
                 "client_id": config["client_id"],
                 "client_secret": config["client_secret"],
