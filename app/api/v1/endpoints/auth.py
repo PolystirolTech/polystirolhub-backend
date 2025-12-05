@@ -6,6 +6,7 @@ from app.api import deps
 from app.core.config import settings
 from app.core.security import create_access_token
 from app.models.user import User, OAuthAccount
+from app.schemas.user import UserUpdate
 import httpx
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
@@ -168,16 +169,25 @@ async def callback(
             provider_account_id = ""
             email = ""
             username = ""
+            avatar = ""
             
             if provider == "twitch":
                 data = user_data["data"][0]
                 provider_account_id = data["id"]
                 email = data.get("email")
                 username = data["login"]
+                avatar = data.get("profile_image_url", "")
             elif provider == "discord":
                 provider_account_id = user_data["id"]
                 email = user_data.get("email")
                 username = user_data["username"]
+                avatar_hash = user_data.get("avatar")
+                if avatar_hash:
+                    avatar = f"https://cdn.discordapp.com/avatars/{provider_account_id}/{avatar_hash}.png?size=512"
+                else:
+                    discriminator = user_data.get("discriminator", "0")
+                    discriminator_mod = int(discriminator) % 5
+                    avatar = f"https://cdn.discordapp.com/embed/avatars/{discriminator_mod}.png"
 
         # Check if OAuth account exists
         result = await db.execute(select(OAuthAccount).where(
@@ -236,7 +246,7 @@ async def callback(
                 user = result.scalars().first()
             
             if not user:
-                user = User(email=email, username=username)
+                user = User(email=email, username=username, avatar=avatar if avatar else None)
                 db.add(user)
                 await db.commit()
                 await db.refresh(user)
@@ -280,6 +290,50 @@ async def get_current_user_info(current_user: User = Depends(deps.get_current_us
         "id": str(current_user.id),
         "email": current_user.email,
         "username": current_user.username,
+        "avatar": current_user.avatar,
+        "is_active": current_user.is_active,
+        "created_at": current_user.created_at.isoformat()
+    }
+
+@router.patch("/me")
+async def update_current_user(
+    user_update: UserUpdate,
+    current_user: User = Depends(deps.get_current_user),
+    db: AsyncSession = Depends(deps.get_db)
+):
+    """Update current user profile"""
+    update_data = user_update.model_dump(exclude_unset=True)
+    
+    if "email" in update_data and update_data["email"] is not None:
+        # Check if email is already taken by another user
+        result = await db.execute(select(User).where(User.email == update_data["email"]))
+        existing_user = result.scalars().first()
+        if existing_user and existing_user.id != current_user.id:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        current_user.email = update_data["email"]
+    
+    if "username" in update_data and update_data["username"] is not None:
+        # Check if username is already taken by another user
+        result = await db.execute(select(User).where(User.username == update_data["username"]))
+        existing_user = result.scalars().first()
+        if existing_user and existing_user.id != current_user.id:
+            raise HTTPException(status_code=400, detail="Username already taken")
+        current_user.username = update_data["username"]
+    
+    if "avatar" in update_data:
+        current_user.avatar = update_data["avatar"]
+    
+    if "is_active" in update_data:
+        current_user.is_active = update_data["is_active"]
+    
+    await db.commit()
+    await db.refresh(current_user)
+    
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "username": current_user.username,
+        "avatar": current_user.avatar,
         "is_active": current_user.is_active,
         "created_at": current_user.created_at.isoformat()
     }

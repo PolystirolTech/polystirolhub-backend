@@ -6,6 +6,7 @@ from datetime import datetime
 class UserBase(BaseModel):
     email: Optional[EmailStr] = None
     username: Optional[str] = None
+    avatar: Optional[str] = None
     is_active: Optional[bool] = True
 
 class UserCreate(UserBase):
