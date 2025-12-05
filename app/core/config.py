@@ -1,46 +1,56 @@
 from pydantic_settings import BaseSettings
 from typing import List, Union
+import json
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "PolystirolHub Backend"
-    API_V1_STR: str = "/api/v1"
-    
-    # CORS
-    BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+	PROJECT_NAME: str = "PolystirolHub Backend"
+	API_V1_STR: str = "/api/v1"
+	
+	# CORS
+	BACKEND_CORS_ORIGINS: Union[str, List[str]] = ["http://localhost:3000", "http://localhost:8000"]
 
-    # Database
-    POSTGRES_SERVER: str = "localhost"
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "postgres"
-    POSTGRES_DB: str = "app"
-    SQLALCHEMY_DATABASE_URI: Union[str, None] = None
+	# Database
+	POSTGRES_SERVER: str = "localhost"
+	POSTGRES_USER: str = "postgres"
+	POSTGRES_PASSWORD: str = "postgres"
+	POSTGRES_DB: str = "app"
+	SQLALCHEMY_DATABASE_URI: Union[str, None] = None
 
-    # Redis
-    REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
+	# Redis
+	REDIS_HOST: str = "localhost"
+	REDIS_PORT: int = 6379
 
-    # Auth
-    SECRET_KEY: str = "CHANGE_THIS_SECRET_KEY"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+	# Auth
+	SECRET_KEY: str = "CHANGE_THIS_SECRET_KEY"
+	ALGORITHM: str = "HS256"
+	ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
-    # OAuth Providers
-    TWITCH_CLIENT_ID: str = ""
-    TWITCH_CLIENT_SECRET: str = ""
-    DISCORD_CLIENT_ID: str = ""
-    DISCORD_CLIENT_SECRET: str = ""
-    STEAM_API_KEY: str = ""
+	# OAuth Providers
+	TWITCH_CLIENT_ID: str = ""
+	TWITCH_CLIENT_SECRET: str = ""
+	DISCORD_CLIENT_ID: str = ""
+	DISCORD_CLIENT_SECRET: str = ""
+	STEAM_API_KEY: str = ""
 
-    # Frontend
-    FRONTEND_URL: str = "http://localhost:3000"
+	# Frontend
+	FRONTEND_URL: str = "http://localhost:3000"
 
-    class Config:
-        case_sensitive = True
-        env_file = ".env"
+	class Config:
+		case_sensitive = True
+		env_file = ".env"
 
-    def __init__(self, **data):
-        super().__init__(**data)
-        if not self.SQLALCHEMY_DATABASE_URI:
-            self.SQLALCHEMY_DATABASE_URI = f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
+	def __init__(self, **data):
+		super().__init__(**data)
+		# Парсинг BACKEND_CORS_ORIGINS из строки
+		if isinstance(self.BACKEND_CORS_ORIGINS, str):
+			# Пробуем парсить как JSON
+			try:
+				self.BACKEND_CORS_ORIGINS = json.loads(self.BACKEND_CORS_ORIGINS)
+			except json.JSONDecodeError:
+				# Если не JSON, парсим как строку через запятую
+				self.BACKEND_CORS_ORIGINS = [origin.strip() for origin in self.BACKEND_CORS_ORIGINS.split(",") if origin.strip()]
+		# Формирование URI для БД
+		if not self.SQLALCHEMY_DATABASE_URI:
+			self.SQLALCHEMY_DATABASE_URI = f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
 
 settings = Settings()
