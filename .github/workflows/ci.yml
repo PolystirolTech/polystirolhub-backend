@@ -90,9 +90,10 @@ jobs:
           SERVER_USER: ${{ secrets.DEV_SSH_USER }}
           SERVER_PATH: ${{ secrets.SERVER_PATH }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_HOST} bash -s << 'EOF'
+          ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_HOST} bash -s "$SERVER_PATH" << 'EOF'
             set -e
-            cd ${SERVER_PATH}
+            SERVER_PATH="$1"
+            cd "$SERVER_PATH"
             
             echo "Остановка старых контейнеров..."
             docker-compose down || true
