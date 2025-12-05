@@ -77,13 +77,20 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
       
+      - name: Test SSH connection
+        env:
+          SERVER_HOST: ${{ secrets.DEV_SSH_HOST }}
+          SERVER_USER: ${{ secrets.DEV_SSH_USER }}
+        run: |
+          ssh -v -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_HOST} "echo 'SSH connection successful'"
+      
       - name: Deploy to server
         env:
           SERVER_HOST: ${{ secrets.DEV_SSH_HOST }}
           SERVER_USER: ${{ secrets.DEV_SSH_USER }}
           SERVER_PATH: ${{ secrets.SERVER_PATH }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_HOST} << 'EOF'
+          ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_HOST} bash -s << 'EOF'
             set -e
             cd ${SERVER_PATH}
             
