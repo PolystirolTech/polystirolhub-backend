@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -131,7 +131,7 @@ async def callback(
         state_data = verify_state_token(state)
         action = state_data.get("action")
         user_id = state_data.get("user_id")
-    except:
+    except Exception:
         error_params = urlencode({"error": "invalid_state"})
         return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
     
