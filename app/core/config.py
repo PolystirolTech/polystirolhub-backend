@@ -32,6 +32,7 @@ class Settings(BaseSettings):
 	TWITCH_CLIENT_SECRET: str = ""
 	DISCORD_CLIENT_ID: str = ""
 	DISCORD_CLIENT_SECRET: str = ""
+	STEAM_CLIENT_ID: str = ""  # Опционально, для совместимости
 	STEAM_API_KEY: str = ""
 
 	# Frontend
