@@ -6,7 +6,7 @@ from app.api import deps
 from app.core.config import settings
 from app.core.security import create_access_token, create_refresh_token
 from app.models.user import User, OAuthAccount
-from app.schemas.user import UserUpdate
+from app.schemas.user import UserUpdate, OAuthAccountPublic
 from app.db.redis import save_refresh_token, get_refresh_token, delete_refresh_token
 import httpx
 from datetime import datetime, timedelta, timezone
@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from itsdangerous import URLSafeTimedSerializer
 import secrets
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 logger = logging.getLogger(__name__)
 
@@ -487,6 +487,7 @@ async def callback(
                 
                 oauth_account.access_token = access_token
                 oauth_account.refresh_token = refresh_token
+                oauth_account.provider_username = username
                 if expires_in:
                     oauth_account.expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
                 else:
@@ -497,6 +498,7 @@ async def callback(
                     user_id=user.id,
                     provider=provider,
                     provider_account_id=provider_account_id,
+                    provider_username=username,
                     access_token=access_token,
                     refresh_token=refresh_token,
                     expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in) if expires_in else None
@@ -519,6 +521,7 @@ async def callback(
             
             oauth_account.access_token = access_token
             oauth_account.refresh_token = refresh_token
+            oauth_account.provider_username = username
             if expires_in:
                 oauth_account.expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
             else:
@@ -557,6 +560,7 @@ async def callback(
                 user_id=user.id,
                 provider=provider,
                 provider_account_id=provider_account_id,
+                provider_username=username,
                 access_token=access_token,
                 refresh_token=refresh_token,
                 expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in) if expires_in else None
@@ -638,6 +642,18 @@ async def get_current_user_info(current_user: User = Depends(deps.get_current_us
         "is_active": current_user.is_active,
         "created_at": current_user.created_at.isoformat()
     }
+
+@router.get("/me/providers", response_model=List[OAuthAccountPublic])
+async def get_user_providers(
+    current_user: User = Depends(deps.get_current_user),
+    db: AsyncSession = Depends(deps.get_db)
+):
+    """Get list of linked OAuth providers for current user"""
+    result = await db.execute(
+        select(OAuthAccount).where(OAuthAccount.user_id == current_user.id)
+    )
+    oauth_accounts = result.scalars().all()
+    return [OAuthAccountPublic.model_validate(account) for account in oauth_accounts]
 
 @router.patch("/me")
 async def update_current_user(
