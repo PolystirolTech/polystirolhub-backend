@@ -103,3 +103,12 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     return user
+
+async def require_debug_mode():
+	"""Dependency для проверки, что DEBUG режим включен"""
+	if not settings.DEBUG:
+		raise HTTPException(
+			status_code=status.HTTP_403_FORBIDDEN,
+			detail="Debug endpoints are disabled in production"
+		)
+	return True

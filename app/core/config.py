@@ -38,6 +38,9 @@ class Settings(BaseSettings):
 	# Frontend
 	FRONTEND_URL: str = "http://localhost:3000"
 
+	# Debug
+	DEBUG: bool = True  # По умолчанию True для разработки
+
 	class Config:
 		case_sensitive = True
 		env_file = ".env"

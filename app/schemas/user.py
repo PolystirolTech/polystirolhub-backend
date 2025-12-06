@@ -8,6 +8,8 @@ class UserBase(BaseModel):
     username: Optional[str] = None
     avatar: Optional[str] = None
     is_active: Optional[bool] = True
+    xp: Optional[int] = 0
+    level: Optional[int] = 1
 
 class UserCreate(UserBase):
     pass
