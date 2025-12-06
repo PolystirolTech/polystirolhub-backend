@@ -216,7 +216,7 @@ async def link(provider: str, current_user: User = Depends(deps.get_current_user
         }
     
     url = f"{config['auth_url']}?{urlencode(params)}"
-    return {"url": url}
+    return RedirectResponse(url)
 
 @router.get("/callback/{provider}")
 async def callback(
