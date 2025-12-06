@@ -312,7 +312,7 @@ async def callback(
                 # Steam should return text/plain, not text/html
                 content_type = verify_response.headers.get('Content-Type', '').lower()
                 if 'text/html' in content_type:
-                    logger.error(f"Steam returned HTML instead of text/plain. This usually means the request was invalid or redirected.")
+                    logger.error("Steam returned HTML instead of text/plain. This usually means the request was invalid or redirected.")
                     if verify_response.status_code == 302:
                         location = verify_response.headers.get('Location', '')
                         logger.error(f"302 redirect to: {location}")
