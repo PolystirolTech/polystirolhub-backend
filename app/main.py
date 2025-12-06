@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from pathlib import Path
 from app.core.config import settings
 from app.api.v1.api import api_router
 
@@ -49,6 +51,19 @@ if settings.BACKEND_CORS_ORIGINS:
     )
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# Mount static files for local storage
+if settings.STORAGE_BACKEND.lower() == "local":
+	# Получаем абсолютный путь к директории uploads
+	uploads_path = Path(settings.STORAGE_LOCAL_PATH)
+	if not uploads_path.is_absolute():
+		uploads_path = Path(__file__).parent.parent / uploads_path
+	
+	# Создаем директорию если не существует
+	uploads_path.mkdir(parents=True, exist_ok=True)
+	
+	# Mount для статических файлов
+	app.mount("/static", StaticFiles(directory=str(uploads_path.parent)), name="static")
 
 @app.get("/health")
 def health_check():

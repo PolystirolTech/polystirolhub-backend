@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Response, Request, status, UploadFile, File
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from app.api import deps
 from app.core.config import settings
 from app.core.security import create_access_token, create_refresh_token
+from app.core.storage import get_storage
 from app.models.user import User, OAuthAccount
 from app.schemas.user import UserUpdate, OAuthAccountPublic
 from app.db.redis import save_refresh_token, get_refresh_token, delete_refresh_token
@@ -14,6 +15,7 @@ from urllib.parse import urlencode
 from itsdangerous import URLSafeTimedSerializer
 import secrets
 import logging
+import uuid
 from typing import Optional, Tuple, List
 
 logger = logging.getLogger(__name__)
@@ -662,6 +664,77 @@ async def get_user_providers(
     oauth_accounts = result.scalars().all()
     return [OAuthAccountPublic.model_validate(account) for account in oauth_accounts]
 
+@router.post("/me/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user: User = Depends(deps.get_current_user),
+    db: AsyncSession = Depends(deps.get_db)
+):
+    """Upload avatar image for current user"""
+    # Валидация типа файла
+    allowed_content_types = ["image/jpeg", "image/png", "image/webp"]
+    if file.content_type not in allowed_content_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed types: {', '.join(allowed_content_types)}"
+        )
+    
+    # Валидация размера файла (5MB)
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+    file_content = await file.read()
+    if len(file_content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size is {MAX_FILE_SIZE / 1024 / 1024}MB"
+        )
+    
+    # Определяем расширение файла
+    content_type_to_ext = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp"
+    }
+    file_ext = content_type_to_ext.get(file.content_type, "jpg")
+    
+    # Генерируем уникальное имя файла
+    file_id = str(uuid.uuid4())
+    file_name = f"{current_user.id}_{file_id}.{file_ext}"
+    file_path = file_name  # Базовый путь уже содержит avatars в STORAGE_LOCAL_PATH
+    
+    # Сохраняем файл через storage service
+    storage = get_storage()
+    avatar_url = await storage.save(file_content, file_path)
+    
+    # Удаляем старый аватар если он существует и это локальный файл
+    if current_user.avatar:
+        old_avatar = current_user.avatar
+        # Проверяем, является ли старый аватар локальным файлом
+        # Может быть полный URL (http://localhost:8000/static/avatars/...) или относительный (/static/avatars/...)
+        local_base_url = settings.STORAGE_BASE_URL
+        full_base_url = f"{settings.BACKEND_URL}{local_base_url}"
+        
+        if old_avatar.startswith(full_base_url) or old_avatar.startswith(local_base_url):
+            # Извлекаем путь из URL
+            old_path = old_avatar.replace(full_base_url, "").replace(local_base_url, "").lstrip("/")
+            try:
+                await storage.delete(old_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete old avatar {old_path}: {e}")
+    
+    # Обновляем аватар в БД
+    current_user.avatar = avatar_url
+    await db.commit()
+    await db.refresh(current_user)
+    
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "username": current_user.username,
+        "avatar": current_user.avatar,
+        "is_active": current_user.is_active,
+        "created_at": current_user.created_at.isoformat()
+    }
+
 @router.patch("/me")
 async def update_current_user(
     user_update: UserUpdate,
@@ -688,7 +761,27 @@ async def update_current_user(
         current_user.username = update_data["username"]
     
     if "avatar" in update_data:
-        current_user.avatar = update_data["avatar"]
+        # Если новый аватар - это URL (обратная совместимость)
+        new_avatar = update_data["avatar"]
+        old_avatar = current_user.avatar
+        
+        # Удаляем старый локальный файл если он существует и это локальный файл
+        if old_avatar:
+            # Проверяем, является ли старый аватар локальным файлом
+            # Может быть полный URL (http://localhost:8000/static/avatars/...) или относительный (/static/avatars/...)
+            local_base_url = settings.STORAGE_BASE_URL
+            full_base_url = f"{settings.BACKEND_URL}{local_base_url}"
+            
+            if old_avatar.startswith(full_base_url) or old_avatar.startswith(local_base_url):
+                # Извлекаем путь из URL
+                old_path = old_avatar.replace(full_base_url, "").replace(local_base_url, "").lstrip("/")
+                try:
+                    storage = get_storage()
+                    await storage.delete(old_path)
+                except Exception as e:
+                    logger.warning(f"Failed to delete old avatar {old_path}: {e}")
+        
+        current_user.avatar = new_avatar
     
     if "is_active" in update_data:
         current_user.is_active = update_data["is_active"]
