@@ -50,6 +50,7 @@ class OAuthAccountPublic(BaseModel):
     """Public schema for OAuth account - safe to return to client"""
     provider: str
     provider_username: Optional[str] = None
+    provider_avatar: Optional[str] = None
     created_at: datetime
 
     class Config:

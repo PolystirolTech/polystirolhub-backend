@@ -488,6 +488,7 @@ async def callback(
                 oauth_account.access_token = access_token
                 oauth_account.refresh_token = refresh_token
                 oauth_account.provider_username = username
+                oauth_account.provider_avatar = avatar
                 if expires_in:
                     oauth_account.expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
                 else:
@@ -499,6 +500,7 @@ async def callback(
                     provider=provider,
                     provider_account_id=provider_account_id,
                     provider_username=username,
+                    provider_avatar=avatar,
                     access_token=access_token,
                     refresh_token=refresh_token,
                     expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in) if expires_in else None
@@ -522,6 +524,7 @@ async def callback(
             oauth_account.access_token = access_token
             oauth_account.refresh_token = refresh_token
             oauth_account.provider_username = username
+            oauth_account.provider_avatar = avatar
             if expires_in:
                 oauth_account.expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
             else:
@@ -561,6 +564,7 @@ async def callback(
                 provider=provider,
                 provider_account_id=provider_account_id,
                 provider_username=username,
+                provider_avatar=avatar,
                 access_token=access_token,
                 refresh_token=refresh_token,
                 expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in) if expires_in else None

@@ -25,6 +25,7 @@ class OAuthAccount(Base):
     provider = Column(String, nullable=False)  # twitch, discord, steam
     provider_account_id = Column(String, nullable=False)
     provider_username = Column(String, nullable=True)  # username from provider
+    provider_avatar = Column(String, nullable=True)  # avatar URL from provider
     access_token = Column(String, nullable=False)
     refresh_token = Column(String, nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)
