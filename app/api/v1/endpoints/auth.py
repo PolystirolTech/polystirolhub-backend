@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from app.api import deps
 from app.core.config import settings
 from app.core.security import create_access_token, create_refresh_token
@@ -786,13 +786,55 @@ async def refresh(
 
 @router.post("/logout")
 async def logout(request: Request, response: Response):
-    """Logout user by clearing the authentication cookies and refresh token"""
-    # Delete refresh token from Redis if exists
-    refresh_token_value = request.cookies.get("refresh_token")
-    if refresh_token_value:
-        await delete_refresh_token(refresh_token_value)
-    
-    # Delete cookies
-    response.delete_cookie(key="access_token")
-    response.delete_cookie(key="refresh_token")
-    return {"message": "Successfully logged out"}
+	"""Logout user by clearing the authentication cookies and refresh token"""
+	# Delete refresh token from Redis if exists
+	refresh_token_value = request.cookies.get("refresh_token")
+	if refresh_token_value:
+		await delete_refresh_token(refresh_token_value)
+	
+	# Delete cookies
+	response.delete_cookie(key="access_token")
+	response.delete_cookie(key="refresh_token")
+	return {"message": "Successfully logged out"}
+
+@router.delete("/unlink/{provider}")
+async def unlink_provider(
+	provider: str,
+	current_user: User = Depends(deps.get_current_user),
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""Unlink OAuth provider from current user account"""
+	if provider not in PROVIDERS:
+		raise HTTPException(status_code=400, detail="Provider not supported")
+	
+	# Get all OAuth accounts for user
+	result = await db.execute(
+		select(OAuthAccount).where(OAuthAccount.user_id == current_user.id)
+	)
+	oauth_accounts = result.scalars().all()
+	
+	# Check if user has more than one provider
+	if len(oauth_accounts) <= 1:
+		raise HTTPException(
+			status_code=400,
+			detail="Cannot unlink the only remaining provider. Add another provider first or delete your account."
+		)
+	
+	# Find the provider account to unlink
+	provider_account = None
+	for account in oauth_accounts:
+		if account.provider == provider:
+			provider_account = account
+			break
+	
+	if not provider_account:
+		raise HTTPException(
+			status_code=404,
+			detail=f"Provider {provider} is not linked to your account"
+		)
+	
+	# Delete the OAuth account
+	await db.execute(delete(OAuthAccount).where(OAuthAccount.id == provider_account.id))
+	await db.commit()
+	
+	return {"message": f"Provider {provider} has been unlinked successfully"}
