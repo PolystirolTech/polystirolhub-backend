@@ -24,6 +24,8 @@ class Settings(BaseSettings):
 	SECRET_KEY: str = "CHANGE_THIS_SECRET_KEY"
 	ALGORITHM: str = "HS256"
 	ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+	REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+	REFRESH_TOKEN_REDIS_PREFIX: str = "refresh_token:"
 
 	# OAuth Providers
 	TWITCH_CLIENT_ID: str = ""

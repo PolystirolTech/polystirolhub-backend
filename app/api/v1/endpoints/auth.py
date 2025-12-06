@@ -1,18 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.api import deps
 from app.core.config import settings
-from app.core.security import create_access_token
+from app.core.security import create_access_token, create_refresh_token
 from app.models.user import User, OAuthAccount
 from app.schemas.user import UserUpdate
+from app.db.redis import save_refresh_token, get_refresh_token, delete_refresh_token
 import httpx
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from itsdangerous import URLSafeTimedSerializer
 import secrets
 import logging
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,81 @@ def verify_state_token(state: str, max_age: int = 600) -> dict:
         return serializer.loads(state, max_age=max_age)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid or expired state token")
+
+async def refresh_oauth_token_if_needed(
+    user: User,
+    db: AsyncSession
+) -> Tuple[Optional[datetime], bool]:
+    """
+    Refresh OAuth tokens if they expired.
+    Returns: (max_expires_at, success)
+    """
+    result = await db.execute(
+        select(OAuthAccount).where(OAuthAccount.user_id == user.id)
+    )
+    oauth_accounts = result.scalars().all()
+    
+    if not oauth_accounts:
+        return None, False
+    
+    max_expires_at = None
+    all_refreshed = True
+    now = datetime.now(timezone.utc)
+    
+    for oauth_account in oauth_accounts:
+        # Skip if token doesn't expire or is still valid
+        if not oauth_account.expires_at or oauth_account.expires_at > now:
+            if oauth_account.expires_at:
+                if max_expires_at is None or oauth_account.expires_at > max_expires_at:
+                    max_expires_at = oauth_account.expires_at
+            continue
+        
+        # Skip if no refresh token
+        if not oauth_account.refresh_token:
+            all_refreshed = False
+            continue
+        
+        # Try to refresh token
+        if oauth_account.provider not in PROVIDERS:
+            all_refreshed = False
+            continue
+        
+        config = PROVIDERS[oauth_account.provider]
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                data = {
+                    "client_id": config["client_id"],
+                    "client_secret": config["client_secret"],
+                    "grant_type": "refresh_token",
+                    "refresh_token": oauth_account.refresh_token,
+                }
+                
+                response = await client.post(config["token_url"], data=data)
+                
+                if response.status_code == 200:
+                    token_data = response.json()
+                    oauth_account.access_token = token_data["access_token"]
+                    oauth_account.refresh_token = token_data.get("refresh_token") or oauth_account.refresh_token
+                    
+                    expires_in = token_data.get("expires_in")
+                    if expires_in:
+                        oauth_account.expires_at = now + timedelta(seconds=int(expires_in))
+                        if max_expires_at is None or oauth_account.expires_at > max_expires_at:
+                            max_expires_at = oauth_account.expires_at
+                    else:
+                        oauth_account.expires_at = None
+                    
+                    await db.commit()
+                    logger.info(f"Refreshed OAuth token for user {user.id}, provider {oauth_account.provider}")
+                else:
+                    logger.warning(f"Failed to refresh OAuth token for user {user.id}, provider {oauth_account.provider}: {response.status_code}")
+                    all_refreshed = False
+        except Exception as e:
+            logger.exception(f"Error refreshing OAuth token for user {user.id}, provider {oauth_account.provider}: {str(e)}")
+            all_refreshed = False
+    
+    return max_expires_at, all_refreshed
 
 @router.get("/login/{provider}")
 def login(provider: str):
@@ -231,7 +308,7 @@ async def callback(
                     provider_account_id=provider_account_id,
                     access_token=access_token,
                     refresh_token=refresh_token,
-                    expires_at=datetime.utcnow() + timedelta(seconds=expires_in) if expires_in else None
+                    expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in) if expires_in else None
                 )
                 db.add(new_oauth)
                 await db.commit()
@@ -252,7 +329,7 @@ async def callback(
             oauth_account.access_token = access_token
             oauth_account.refresh_token = refresh_token
             if expires_in:
-                oauth_account.expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+                oauth_account.expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
             await db.commit()
         else:
             if email:
@@ -282,19 +359,54 @@ async def callback(
             error_params = urlencode({"error": "user_creation_failed"})
             return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
 
-        # Create JWT and set as HTTP-only cookie
+        # Create JWT access token
         access_token_jwt = create_access_token(subject=user.id)
+        
+        # Create refresh token
+        refresh_token_value = create_refresh_token()
+        
+        # Calculate refresh token TTL: minimum 30 days or OAuth token expiration if longer
+        min_refresh_ttl = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # 30 days in seconds
+        refresh_ttl = min_refresh_ttl
+        
+        # Check all OAuth token expirations to find maximum
+        result = await db.execute(
+            select(OAuthAccount).where(OAuthAccount.user_id == user.id)
+        )
+        all_oauth_accounts = result.scalars().all()
+        
+        for acc in all_oauth_accounts:
+            if acc.expires_at:
+                oauth_ttl = int((acc.expires_at - datetime.now(timezone.utc)).total_seconds())
+                if oauth_ttl > refresh_ttl:
+                    refresh_ttl = oauth_ttl
+        
+        # Save refresh token to Redis
+        await save_refresh_token(str(user.id), refresh_token_value, refresh_ttl)
         
         response = RedirectResponse(f"{settings.FRONTEND_URL}/auth/success")
         
-        # Set HTTP-only cookie for security
+        # Set HTTP-only cookies for security
+        is_secure = settings.FRONTEND_URL.startswith("https")
+        
+        # Access token cookie (30 minutes)
         response.set_cookie(
             key="access_token",
             value=access_token_jwt,
             httponly=True,  # Prevents JavaScript access
-            secure=settings.FRONTEND_URL.startswith("https"),  # Only send over HTTPS in production
+            secure=is_secure,  # Only send over HTTPS in production
             samesite="lax",  # CSRF protection
             max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        )
+        
+        # Refresh token cookie (30+ days)
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token_value,
+            httponly=True,
+            secure=is_secure,
+            samesite="lax",
+            max_age=refresh_ttl
         )
         
         return response
@@ -359,8 +471,94 @@ async def update_current_user(
         "created_at": current_user.created_at.isoformat()
     }
 
+@router.post("/refresh")
+async def refresh(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(deps.get_db)
+):
+    """Refresh access token using refresh token"""
+    refresh_token_value = request.cookies.get("refresh_token")
+    
+    if not refresh_token_value:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token not found"
+        )
+    
+    # Get user_id from Redis
+    user_id = await get_refresh_token(refresh_token_value)
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token"
+        )
+    
+    # Get user from database
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+    
+    if not user:
+        # Clean up invalid token
+        await delete_refresh_token(refresh_token_value)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
+        )
+    
+    # Refresh OAuth tokens if needed
+    max_expires_at, _ = await refresh_oauth_token_if_needed(user, db)
+    
+    # Create new tokens (rotation)
+    new_access_token = create_access_token(subject=user.id)
+    new_refresh_token = create_refresh_token()
+    
+    # Calculate new refresh token TTL
+    min_refresh_ttl = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+    refresh_ttl = min_refresh_ttl
+    
+    if max_expires_at:
+        oauth_ttl = int((max_expires_at - datetime.now(timezone.utc)).total_seconds())
+        if oauth_ttl > refresh_ttl:
+            refresh_ttl = oauth_ttl
+    
+    # Delete old refresh token and save new one
+    await delete_refresh_token(refresh_token_value)
+    await save_refresh_token(str(user.id), new_refresh_token, refresh_ttl)
+    
+    # Update cookies
+    is_secure = settings.FRONTEND_URL.startswith("https")
+    
+    response.set_cookie(
+        key="access_token",
+        value=new_access_token,
+        httponly=True,
+        secure=is_secure,
+        samesite="lax",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    )
+    
+    response.set_cookie(
+        key="refresh_token",
+        value=new_refresh_token,
+        httponly=True,
+        secure=is_secure,
+        samesite="lax",
+        max_age=refresh_ttl
+    )
+    
+    return {"message": "Tokens refreshed successfully"}
+
 @router.post("/logout")
-async def logout(response: Response):
-    """Logout user by clearing the authentication cookie"""
+async def logout(request: Request, response: Response):
+    """Logout user by clearing the authentication cookies and refresh token"""
+    # Delete refresh token from Redis if exists
+    refresh_token_value = request.cookies.get("refresh_token")
+    if refresh_token_value:
+        await delete_refresh_token(refresh_token_value)
+    
+    # Delete cookies
     response.delete_cookie(key="access_token")
+    response.delete_cookie(key="refresh_token")
     return {"message": "Successfully logged out"}
