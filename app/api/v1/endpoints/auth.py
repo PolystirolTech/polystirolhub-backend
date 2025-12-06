@@ -260,10 +260,13 @@ async def callback(
                     action = state_data.get("action")
                     user_id = state_data.get("user_id")
                 except Exception:
-                    # Invalid state, default to login
-                    action = "login"
-                    user_id = None
+                    # Invalid or expired state token - return error instead of fallback to login
+                    # This prevents security issues where invalid linking attempts become logins
+                    logger.warning(f"Invalid state token for Steam callback: {state[:20] if state else 'None'}")
+                    error_params = urlencode({"error": "invalid_state"})
+                    return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
             else:
+                # No state means this is a login flow (not linking)
                 action = "login"
                 user_id = None
             
@@ -457,10 +460,6 @@ async def callback(
                         discriminator = user_data.get("discriminator", "0")
                         discriminator_mod = int(discriminator) % 5
                         avatar = f"https://cdn.discordapp.com/embed/avatars/{discriminator_mod}.png"
-            
-            # For OAuth 2.0, we have action and user_id from state
-            action = state_data.get("action")
-            user_id = state_data.get("user_id")
 
         # Check if OAuth account exists
         result = await db.execute(select(OAuthAccount).where(
@@ -480,11 +479,13 @@ async def callback(
                 error_params = urlencode({"error": "link_error"})
                 return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
             
+            # Check if this provider account is already linked to another user
             if oauth_account:
                 if oauth_account.user_id != user.id:
                     error_params = urlencode({"error": "already_linked"})
                     return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
                 
+                # Update existing OAuth account (refresh tokens)
                 oauth_account.access_token = access_token
                 oauth_account.refresh_token = refresh_token
                 oauth_account.provider_username = username
@@ -495,6 +496,7 @@ async def callback(
                     oauth_account.expires_at = None
                 await db.commit()
             else:
+                # Create new OAuth account link
                 new_oauth = OAuthAccount(
                     user_id=user.id,
                     provider=provider,
@@ -508,10 +510,11 @@ async def callback(
                 db.add(new_oauth)
                 await db.commit()
                 
+            # Return success - DO NOT create JWT tokens for linking
             success_params = urlencode({"success": "true"})
             return RedirectResponse(f"{settings.FRONTEND_URL}/auth/link-success?{success_params}")
 
-        # Handle Login
+        # Handle Login (only if not linking)
         if oauth_account:
             result = await db.execute(select(User).where(User.id == oauth_account.user_id))
             user = result.scalars().first()
