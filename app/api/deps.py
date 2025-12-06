@@ -1,5 +1,5 @@
 from typing import AsyncGenerator, Optional
-from fastapi import Depends, HTTPException, status, Request, Response
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +9,7 @@ from app.core.security import create_access_token, create_refresh_token
 from app.db.session import AsyncSessionLocal
 from app.db.redis import get_refresh_token, save_refresh_token, delete_refresh_token
 from app.models.user import User
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login/access-token", auto_error=False)
 
