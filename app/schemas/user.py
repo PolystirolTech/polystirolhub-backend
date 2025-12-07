@@ -8,6 +8,8 @@ class UserBase(BaseModel):
     username: Optional[str] = None
     avatar: Optional[str] = None
     is_active: Optional[bool] = True
+    is_admin: Optional[bool] = False
+    is_super_admin: Optional[bool] = False
     xp: Optional[int] = 0
     level: Optional[int] = 1
 

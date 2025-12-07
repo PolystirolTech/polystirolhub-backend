@@ -104,6 +104,28 @@ async def get_current_user(
         raise credentials_exception
     return user
 
+async def get_current_admin(
+	current_user: User = Depends(get_current_user)
+) -> User:
+	"""Get current user and verify they are an admin (is_admin=True or is_super_admin=True)"""
+	if not current_user.is_admin and not current_user.is_super_admin:
+		raise HTTPException(
+			status_code=status.HTTP_403_FORBIDDEN,
+			detail="Not enough permissions. Admin access required."
+		)
+	return current_user
+
+async def get_current_super_admin(
+	current_user: User = Depends(get_current_user)
+) -> User:
+	"""Get current user and verify they are a super admin (is_super_admin=True)"""
+	if not current_user.is_super_admin:
+		raise HTTPException(
+			status_code=status.HTTP_403_FORBIDDEN,
+			detail="Not enough permissions. Super admin access required."
+		)
+	return current_user
+
 async def require_debug_mode():
 	"""Dependency для проверки, что DEBUG режим включен"""
 	if not settings.DEBUG:

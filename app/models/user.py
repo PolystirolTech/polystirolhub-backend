@@ -13,6 +13,8 @@ class User(Base):
 	username = Column(String, unique=True, index=True, nullable=True)
 	avatar = Column(String, nullable=True)
 	is_active = Column(Boolean, default=True)
+	is_admin = Column(Boolean, default=False, nullable=False)
+	is_super_admin = Column(Boolean, default=False, nullable=False)
 	xp = Column(Integer, default=0, nullable=False)
 	level = Column(Integer, default=1, nullable=False)
 	created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -649,6 +649,8 @@ async def get_current_user_info(current_user: User = Depends(deps.get_current_us
         "username": current_user.username,
         "avatar": current_user.avatar,
         "is_active": current_user.is_active,
+        "is_admin": current_user.is_admin,
+        "is_super_admin": current_user.is_super_admin,
         "created_at": current_user.created_at.isoformat()
     }
 
