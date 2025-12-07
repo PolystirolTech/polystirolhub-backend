@@ -28,6 +28,7 @@ class GameServerBase(BaseModel):
 	description: Optional[str] = None
 	mods: list[str] = []
 	ip: str
+	port: Optional[int] = None
 
 class GameServerCreate(GameServerBase):
 	pass
@@ -39,6 +40,7 @@ class GameServerUpdate(BaseModel):
 	description: Optional[str] = None
 	mods: Optional[list[str]] = None
 	ip: Optional[str] = None
+	port: Optional[int] = None
 
 class GameServerResponse(GameServerBase):
 	id: UUID
@@ -58,8 +60,21 @@ class GameServerPublic(BaseModel):
 	description: Optional[str] = None
 	mods: list[str]
 	ip: str
+	port: Optional[int] = None
 	created_at: datetime
 	updated_at: datetime
 
 	class Config:
 		from_attributes = True
+
+# Схема ответа статуса сервера
+class ServerStatusResponse(BaseModel):
+	server_icon: Optional[str] = None  # base64
+	motd: Optional[str] = None
+	players_online: int = 0
+	players_max: int = 0
+	players_list: Optional[list[str]] = None
+	ping: Optional[float] = None
+	version: Optional[str] = None
+	online: bool = False
+	error: Optional[str] = None

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from typing import Optional
 from app.api import deps
 from app.models.user import User
 from app.models.game_server import GameType, GameServer
@@ -10,8 +11,10 @@ from app.schemas.game_server import (
 	GameTypeUpdate,
 	GameTypeResponse,
 	GameServerResponse,
-	GameServerPublic
+	GameServerPublic,
+	ServerStatusResponse
 )
+from app.services.server_status import get_server_status
 from app.core.storage import get_banners_storage
 from app.core.config import settings
 from uuid import UUID
@@ -67,6 +70,29 @@ async def get_game_server(
 		)
 	
 	return server
+
+@router.get("/game-servers/{server_id}/status", response_model=ServerStatusResponse)
+async def get_game_server_status(
+	server_id: UUID,
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""Получение статуса игрового сервера (icon, motd, players, ping)"""
+	result = await db.execute(
+		select(GameServer)
+		.where(GameServer.id == server_id)
+	)
+	server = result.scalars().first()
+	
+	if not server:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail="Game server not found"
+		)
+	
+	# Получаем статус через сервис (с кэшированием)
+	status_data = await get_server_status(server.id, server.ip, server.port)
+	
+	return ServerStatusResponse(**status_data)
 
 # ========== Админские эндпоинты для типов игр ==========
 
@@ -179,6 +205,7 @@ async def create_game_server(
 	description: str = Form(None),
 	mods: str = Form("[]"),  # JSON строка массива
 	ip: str = Form(...),
+	port: Optional[int] = Form(None),
 	banner: UploadFile = File(None),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
@@ -248,6 +275,7 @@ async def create_game_server(
 		description=description,
 		mods=mods_list,
 		ip=ip,
+		port=port,
 		banner_url=banner_url
 	)
 	
@@ -309,6 +337,7 @@ async def update_game_server(
 	description: str = Form(None),
 	mods: str = Form(None),
 	ip: str = Form(None),
+	port: Optional[int] = Form(None),
 	banner: UploadFile = File(None),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
@@ -365,6 +394,9 @@ async def update_game_server(
 	
 	if ip is not None:
 		server.ip = ip
+	
+	if port is not None:
+		server.port = port
 	
 	# Обрабатываем новый баннер если загружен
 	if banner:
