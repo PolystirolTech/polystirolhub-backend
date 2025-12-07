@@ -711,7 +711,7 @@ async def upload_avatar(
         # Проверяем, является ли старый аватар локальным файлом
         # Может быть полный URL (http://localhost:8000/static/avatars/...) или относительный (/static/avatars/...)
         local_base_url = settings.STORAGE_BASE_URL
-        full_base_url = f"{settings.BACKEND_URL}{local_base_url}"
+        full_base_url = f"{settings.STORAGE_BASE_URL}{local_base_url}"
         
         if old_avatar.startswith(full_base_url) or old_avatar.startswith(local_base_url):
             # Извлекаем путь из URL
@@ -770,7 +770,7 @@ async def update_current_user(
             # Проверяем, является ли старый аватар локальным файлом
             # Может быть полный URL (http://localhost:8000/static/avatars/...) или относительный (/static/avatars/...)
             local_base_url = settings.STORAGE_BASE_URL
-            full_base_url = f"{settings.BACKEND_URL}{local_base_url}"
+            full_base_url = f"{settings.STORAGE_BASE_URL}{local_base_url}"
             
             if old_avatar.startswith(full_base_url) or old_avatar.startswith(local_base_url):
                 # Извлекаем путь из URL

@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 	FRONTEND_URL: str = "http://localhost:3000"
 	
 	# Backend
-	BACKEND_URL: str = "http://localhost:8000"  # Базовый URL бэкенда для формирования полных URL
+	STORAGE_BASE_URL: str = "http://localhost:8000"  # Базовый URL бэкенда для формирования полных URL
 
 	# Storage
 	STORAGE_BACKEND: str = "local"  # "local" or "s3"

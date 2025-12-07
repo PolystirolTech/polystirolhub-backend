@@ -140,7 +140,7 @@ def get_storage_backend() -> StorageBackend:
 		return LocalStorageBackend(
 			base_path=str(base_path),
 			base_url=settings.STORAGE_BASE_URL,
-			backend_url=settings.BACKEND_URL
+			backend_url=settings.STORAGE_BASE_URL
 		)
 	elif backend_type == "s3":
 		return S3StorageBackend(
