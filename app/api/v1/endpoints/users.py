@@ -127,7 +127,7 @@ async def get_leaderboard(
 			# Выполняем запрос к БД
 			result = await db.execute(
 				select(User)
-				.where(User.is_active == True)
+				.where(User.is_active)
 				.order_by(desc(User.level), desc(User.xp))
 				.limit(5)
 			)
@@ -157,7 +157,7 @@ async def get_leaderboard(
 			# Fallback: возвращаем пустой список или делаем прямой запрос
 			result = await db.execute(
 				select(User)
-				.where(User.is_active == True)
+				.where(User.is_active)
 				.order_by(desc(User.level), desc(User.xp))
 				.limit(5)
 			)
@@ -192,7 +192,7 @@ async def get_leaderboard(
 		logger.warning("Cache not available after lock wait, falling back to direct DB query")
 		result = await db.execute(
 			select(User)
-			.where(User.is_active == True)
+			.where(User.is_active)
 			.order_by(desc(User.level), desc(User.xp))
 			.limit(5)
 		)

@@ -50,7 +50,7 @@ async def check_super_admin(
 ):
 	"""Публичный эндпоинт для проверки наличия super admin в БД. Возвращает true/false."""
 	result = await db.execute(
-		select(func.count(User.id)).where(User.is_super_admin == True)
+		select(func.count(User.id)).where(User.is_super_admin)
 	)
 	super_admin_count = result.scalar()
 	return {"has_super_admin": super_admin_count > 0}
@@ -64,7 +64,7 @@ async def create_super_admin(
 	"""Создание первого super admin. Доступно только если нет ни одного super admin."""
 	# Проверяем, есть ли уже super admin
 	result = await db.execute(
-		select(func.count(User.id)).where(User.is_super_admin == True)
+		select(func.count(User.id)).where(User.is_super_admin)
 	)
 	super_admin_count = result.scalar()
 	
@@ -194,7 +194,7 @@ async def list_admins(
 	# Получаем всех админов (is_admin=True или is_super_admin=True)
 	result = await db.execute(
 		select(User).where(
-			(User.is_admin == True) | (User.is_super_admin == True)
+			(User.is_admin) | (User.is_super_admin)
 		).order_by(User.created_at)
 	)
 	admins = result.scalars().all()
