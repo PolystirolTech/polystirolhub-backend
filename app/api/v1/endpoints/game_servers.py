@@ -21,10 +21,40 @@ from uuid import UUID
 import logging
 import uuid
 import json
+import re
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+def parse_and_validate_mods(mods_json: str) -> list[str]:
+	"""
+	Парсит и валидирует моды в формате JSON массива.
+	Каждый элемент должен быть в формате "название: ссылка".
+	"""
+	try:
+		mods_list = json.loads(mods_json) if mods_json else []
+		if not isinstance(mods_list, list):
+			raise ValueError("mods must be a list")
+		
+		# Валидируем формат каждого мода
+		mod_pattern = re.compile(r'^.+:\s*.+$')
+		for i, mod in enumerate(mods_list):
+			if not isinstance(mod, str):
+				raise ValueError(f"mod at index {i} must be a string")
+			if not mod_pattern.match(mod.strip()):
+				raise ValueError(
+					f"mod at index {i} must be in format 'название: ссылка', got: '{mod}'"
+				)
+		
+		# Нормализуем формат (убираем лишние пробелы, но сохраняем структуру)
+		normalized_mods = [mod.strip() for mod in mods_list if mod.strip()]
+		
+		return normalized_mods
+	except json.JSONDecodeError as e:
+		raise ValueError(f"mods must be a valid JSON array: {e}")
+	except ValueError as e:
+		raise e
 
 # ========== Публичные эндпоинты ==========
 
@@ -221,15 +251,13 @@ async def create_game_server(
 			detail="Game type not found"
 		)
 	
-	# Парсим моды из JSON строки
+	# Парсим и валидируем моды из JSON строки
 	try:
-		mods_list = json.loads(mods) if mods else []
-		if not isinstance(mods_list, list):
-			raise ValueError("mods must be a list")
-	except (json.JSONDecodeError, ValueError):
+		mods_list = parse_and_validate_mods(mods)
+	except ValueError as e:
 		raise HTTPException(
 			status_code=status.HTTP_400_BAD_REQUEST,
-			detail="mods must be a valid JSON array"
+			detail=str(e)
 		)
 	
 	# Обрабатываем баннер если загружен
@@ -382,13 +410,11 @@ async def update_game_server(
 	
 	if mods is not None:
 		try:
-			mods_list = json.loads(mods) if mods else []
-			if not isinstance(mods_list, list):
-				raise ValueError("mods must be a list")
-		except (json.JSONDecodeError, ValueError):
+			mods_list = parse_and_validate_mods(mods)
+		except ValueError as e:
 			raise HTTPException(
 				status_code=status.HTTP_400_BAD_REQUEST,
-				detail="mods must be a valid JSON array"
+				detail=str(e)
 			)
 		server.mods = mods_list
 	
