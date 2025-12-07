@@ -57,3 +57,14 @@ class OAuthAccountPublic(BaseModel):
 
     class Config:
         from_attributes = True
+
+class LeaderboardPlayer(BaseModel):
+    """Schema for player in leaderboard"""
+    id: UUID
+    username: Optional[str] = None
+    level: int
+    xp: int
+    avatar: Optional[str] = None
+
+    class Config:
+        from_attributes = True

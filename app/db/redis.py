@@ -1,5 +1,6 @@
-from typing import Optional
+from typing import Optional, Any
 import redis.asyncio as redis
+import json
 from app.core.config import settings
 
 _redis_client: Optional[redis.Redis] = None
@@ -33,3 +34,36 @@ async def delete_refresh_token(token: str) -> None:
     client = await get_redis()
     key = f"{settings.REFRESH_TOKEN_REDIS_PREFIX}{token}"
     await client.delete(key)
+
+async def get_cache(key: str) -> Optional[str]:
+    """Get value from cache"""
+    try:
+        client = await get_redis()
+        return await client.get(key)
+    except Exception:
+        return None
+
+async def set_cache(key: str, value: str, ttl: int) -> None:
+    """Set value in cache with TTL"""
+    try:
+        client = await get_redis()
+        await client.setex(key, ttl, value)
+    except Exception:
+        pass
+
+async def acquire_lock(key: str, timeout: int = 5) -> bool:
+    """Acquire distributed lock. Returns True if lock acquired, False otherwise"""
+    try:
+        client = await get_redis()
+        result = await client.set(key, "1", nx=True, ex=timeout)
+        return result is True
+    except Exception:
+        return False
+
+async def release_lock(key: str) -> None:
+    """Release distributed lock"""
+    try:
+        client = await get_redis()
+        await client.delete(key)
+    except Exception:
+        pass
