@@ -44,6 +44,18 @@ class UserResponse(BaseModel):
 		from_attributes = True
 
 
+@router.get("/check-super-admin")
+async def check_super_admin(
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""Публичный эндпоинт для проверки наличия super admin в БД. Возвращает true/false."""
+	result = await db.execute(
+		select(func.count(User.id)).where(User.is_super_admin == True)
+	)
+	super_admin_count = result.scalar()
+	return {"has_super_admin": super_admin_count > 0}
+
+
 @router.post("/create-super-admin", response_model=AdminResponse)
 async def create_super_admin(
 	request: CreateSuperAdminRequest,
