@@ -139,8 +139,8 @@ def get_storage_backend() -> StorageBackend:
 		
 		return LocalStorageBackend(
 			base_path=str(base_path),
-			base_url=settings.STORAGE_BASE_URL,
-			backend_url=settings.STORAGE_BASE_URL
+			base_url=settings.STORAGE_AVATARS_BASE_URL,
+			backend_url=settings.BACKEND_BASE_URL
 		)
 	elif backend_type == "s3":
 		return S3StorageBackend(
@@ -151,8 +151,9 @@ def get_storage_backend() -> StorageBackend:
 	else:
 		raise ValueError(f"Unknown storage backend: {backend_type}")
 
-# Глобальный экземпляр бэкенда
+# Глобальные экземпляры бэкендов
 _storage_backend: StorageBackend = None
+_banners_storage_backend: StorageBackend = None
 
 def get_storage() -> StorageBackend:
 	"""Получить глобальный экземпляр бэкенда хранения (singleton)"""
@@ -160,3 +161,35 @@ def get_storage() -> StorageBackend:
 	if _storage_backend is None:
 		_storage_backend = get_storage_backend()
 	return _storage_backend
+
+def get_banners_storage_backend() -> StorageBackend:
+	"""Фабрика для получения бэкенда хранения баннеров"""
+	backend_type = settings.STORAGE_BACKEND.lower()
+	
+	if backend_type == "local":
+		# Получаем абсолютный путь
+		base_path = Path(settings.STORAGE_BANNERS_LOCAL_PATH)
+		if not base_path.is_absolute():
+			# Относительно корня проекта
+			base_path = Path(__file__).parent.parent.parent / base_path
+		
+		return LocalStorageBackend(
+			base_path=str(base_path),
+			base_url=settings.STORAGE_BANNERS_BASE_URL,
+			backend_url=settings.BACKEND_BASE_URL
+		)
+	elif backend_type == "s3":
+		return S3StorageBackend(
+			bucket=settings.STORAGE_S3_BUCKET,
+			region=settings.STORAGE_S3_REGION,
+			base_url=getattr(settings, "STORAGE_S3_BASE_URL", None)
+		)
+	else:
+		raise ValueError(f"Unknown storage backend: {backend_type}")
+
+def get_banners_storage() -> StorageBackend:
+	"""Получить глобальный экземпляр бэкенда хранения баннеров (singleton)"""
+	global _banners_storage_backend
+	if _banners_storage_backend is None:
+		_banners_storage_backend = get_banners_storage_backend()
+	return _banners_storage_backend

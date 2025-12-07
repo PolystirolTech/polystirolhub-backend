@@ -39,12 +39,15 @@ class Settings(BaseSettings):
 	FRONTEND_URL: str = "http://localhost:3000"
 	
 	# Backend
-	STORAGE_BASE_URL: str = "http://localhost:8000"  # Базовый URL бэкенда для формирования полных URL
+	BACKEND_BASE_URL: str = "http://localhost:8000"  # Базовый URL бэкенда для формирования полных URL
 
 	# Storage
 	STORAGE_BACKEND: str = "local"  # "local" or "s3"
 	STORAGE_LOCAL_PATH: str = "uploads/avatars"  # Путь для локального хранения
-	STORAGE_BASE_URL: str = "/static/avatars"  # Базовый URL для доступа к файлам (относительный путь)
+	STORAGE_AVATARS_BASE_URL: str = "/static/avatars"  # Базовый URL для доступа к аватарам (относительный путь)
+	# Banners storage
+	STORAGE_BANNERS_LOCAL_PATH: str = "uploads/banners"  # Путь для локального хранения баннеров
+	STORAGE_BANNERS_BASE_URL: str = "/static/banners"  # Базовый URL для доступа к баннерам
 	# S3 настройки (для будущего использования)
 	STORAGE_S3_BUCKET: str = ""
 	STORAGE_S3_REGION: str = "us-east-1"

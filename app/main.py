@@ -62,6 +62,12 @@ if settings.STORAGE_BACKEND.lower() == "local":
 	# Создаем директорию если не существует
 	uploads_path.mkdir(parents=True, exist_ok=True)
 	
+	# Создаем директорию для баннеров если не существует
+	banners_path = Path(settings.STORAGE_BANNERS_LOCAL_PATH)
+	if not banners_path.is_absolute():
+		banners_path = Path(__file__).parent.parent / banners_path
+	banners_path.mkdir(parents=True, exist_ok=True)
+	
 	# Mount для статических файлов
 	app.mount("/static", StaticFiles(directory=str(uploads_path.parent)), name="static")
 
