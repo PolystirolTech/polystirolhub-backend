@@ -60,9 +60,37 @@ async def acquire_lock(key: str, timeout: int = 5) -> bool:
         return False
 
 async def release_lock(key: str) -> None:
-    """Release distributed lock"""
-    try:
-        client = await get_redis()
-        await client.delete(key)
-    except Exception:
-        pass
+	"""Release distributed lock"""
+	try:
+		client = await get_redis()
+		await client.delete(key)
+	except Exception:
+		pass
+
+async def save_link_code(code: str, user_id: str, ttl: int = 300) -> None:
+	"""Save link code to Redis with TTL (default 5 minutes)"""
+	try:
+		client = await get_redis()
+		key = f"link_code:{code}"
+		await client.setex(key, ttl, user_id)
+	except Exception:
+		pass
+
+async def get_link_code(code: str) -> Optional[str]:
+	"""Get user_id by link code"""
+	try:
+		client = await get_redis()
+		key = f"link_code:{code}"
+		user_id = await client.get(key)
+		return user_id
+	except Exception:
+		return None
+
+async def delete_link_code(code: str) -> None:
+	"""Delete link code from Redis (one-time use)"""
+	try:
+		client = await get_redis()
+		key = f"link_code:{code}"
+		await client.delete(key)
+	except Exception:
+		pass

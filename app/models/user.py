@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -20,6 +20,7 @@ class User(Base):
 	created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 	oauth_accounts = relationship("OAuthAccount", back_populates="user", cascade="all, delete-orphan")
+	external_links = relationship("ExternalLink", back_populates="user", cascade="all, delete-orphan")
 
 class OAuthAccount(Base):
 	__tablename__ = "oauth_accounts"
@@ -36,3 +37,19 @@ class OAuthAccount(Base):
 	created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 	user = relationship("User", back_populates="oauth_accounts")
+
+class ExternalLink(Base):
+	__tablename__ = "external_links"
+
+	id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+	user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+	platform = Column(String, nullable=False)
+	external_id = Column(String, nullable=False)
+	platform_username = Column(String, nullable=True)
+	created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+	user = relationship("User", back_populates="external_links")
+
+	__table_args__ = (
+		UniqueConstraint('platform', 'external_id', name='uq_platform_external_id'),
+	)

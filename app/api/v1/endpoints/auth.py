@@ -6,9 +6,10 @@ from app.api import deps
 from app.core.config import settings
 from app.core.security import create_access_token, create_refresh_token
 from app.core.storage import get_storage
-from app.models.user import User, OAuthAccount
+from app.models.user import User, OAuthAccount, ExternalLink
 from app.schemas.user import UserUpdate, OAuthAccountPublic
-from app.db.redis import save_refresh_token, get_refresh_token, delete_refresh_token
+from app.schemas.link import LinkCodeGenerateResponse, LinkRequest, LinkResponse, LinkStatusResponse, ExternalLinkResponse
+from app.db.redis import save_refresh_token, get_refresh_token, delete_refresh_token, save_link_code, get_link_code, delete_link_code
 import httpx
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
@@ -16,6 +17,7 @@ from itsdangerous import URLSafeTimedSerializer
 import secrets
 import logging
 import uuid
+from uuid import UUID
 from typing import Optional, Tuple, List
 
 logger = logging.getLogger(__name__)
@@ -933,3 +935,89 @@ async def unlink_provider(
 	await db.commit()
 	
 	return {"message": f"Provider {provider} has been unlinked successfully"}
+
+def generate_link_code() -> str:
+	"""Generate link code in format XXXX-YYYY (alphanumeric, uppercase)"""
+	import string
+	chars = string.ascii_uppercase + string.digits
+	part1 = ''.join(secrets.choice(chars) for _ in range(4))
+	part2 = ''.join(secrets.choice(chars) for _ in range(4))
+	return f"{part1}-{part2}"
+
+@router.post("/generate-link-code", response_model=LinkCodeGenerateResponse)
+async def generate_link_code_endpoint(
+	current_user: User = Depends(deps.get_current_user)
+):
+	"""Generate a one-time link code for linking game UUID to user account"""
+	code = generate_link_code()
+	await save_link_code(code, str(current_user.id), ttl=300)
+	return LinkCodeGenerateResponse(link_code=code)
+
+@router.post("/link", response_model=LinkResponse)
+async def link_game_account(
+	link_data: LinkRequest,
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""Link game UUID to user account using one-time link code"""
+	# Get and delete code from Redis (one-time use)
+	user_id = await get_link_code(link_data.link_code)
+	if not user_id:
+		raise HTTPException(
+			status_code=status.HTTP_400_BAD_REQUEST,
+			detail="Invalid or expired link code"
+		)
+	
+	# Delete code immediately after use
+	await delete_link_code(link_data.link_code)
+	
+	# Check if this (platform, game_id) is already linked
+	result = await db.execute(
+		select(ExternalLink).where(
+			ExternalLink.platform == link_data.platform,
+			ExternalLink.external_id == link_data.game_id
+		)
+	)
+	existing_link = result.scalars().first()
+	if existing_link:
+		raise HTTPException(
+			status_code=status.HTTP_409_CONFLICT,
+			detail="This game ID is already linked"
+		)
+	
+	# Create new external link
+	external_link = ExternalLink(
+		user_id=uuid.UUID(user_id),
+		platform=link_data.platform,
+		external_id=link_data.game_id,
+		platform_username=link_data.platform_username
+	)
+	db.add(external_link)
+	await db.commit()
+	
+	return LinkResponse(status="success", message="Game account linked successfully")
+
+@router.get("/check-link-status/{user_id}", response_model=LinkStatusResponse)
+async def check_link_status(
+	user_id: UUID,
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""Check link status for a user by user_id"""
+	# Verify user exists
+	result = await db.execute(select(User).where(User.id == user_id))
+	user = result.scalars().first()
+	if not user:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail="User not found"
+		)
+	
+	# Get all external links for this user
+	result = await db.execute(
+		select(ExternalLink).where(ExternalLink.user_id == user_id)
+	)
+	external_links = result.scalars().all()
+	
+	return LinkStatusResponse(
+		user_id=user_id,
+		links=[ExternalLinkResponse.model_validate(link) for link in external_links]
+	)
