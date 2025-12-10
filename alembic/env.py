@@ -10,8 +10,15 @@ from alembic import context
 from app.db.base_class import Base  # noqa: E402
 from app.core.config import settings  # noqa: E402
 # Import models so they're registered in Base.metadata for autogenerate
-from app.models.user import User, OAuthAccount  # noqa: E402, F401
+from app.models.user import User, OAuthAccount, ExternalLink  # noqa: E402, F401
 from app.models.game_server import GameType, GameServer  # noqa: E402, F401
+from app.models.statistics import (  # noqa: E402, F401
+	MinecraftServer, MinecraftUser, MinecraftUserInfo, MinecraftSession,
+	MinecraftNickname, MinecraftKill, MinecraftPing, MinecraftPlatform,
+	MinecraftPluginVersion, MinecraftTPS, MinecraftWorld, MinecraftWorldTime,
+	MinecraftJoinAddress, MinecraftVersionProtocol, MinecraftGeolocation,
+	MinecraftSettings
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
