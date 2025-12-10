@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import selectinload
 from typing import Dict, List, Optional, Tuple
 import logging
 
@@ -38,6 +39,7 @@ async def validate_server_uuid(db: AsyncSession, server_uuid: str) -> Optional[G
 	# Проверяем наличие minecraft_server с таким server_uuid
 	result = await db.execute(
 		select(MinecraftServerModel)
+		.options(selectinload(MinecraftServerModel.game_server))
 		.join(GameServer, MinecraftServerModel.game_server_id == GameServer.id)
 		.where(MinecraftServerModel.server_uuid == server_uuid)
 	)

@@ -147,12 +147,11 @@ async def get_player_profile(
 	
 	# Последний раз видели
 	last_seen = None
-	if user.sessions:
-		result = await db.execute(
-			select(func.max(MinecraftSession.session_end))
-			.where(MinecraftSession.user_id == user.id)
-		)
-		last_seen = result.scalar_one()
+	result = await db.execute(
+		select(func.max(MinecraftSession.session_end))
+		.where(MinecraftSession.user_id == user.id)
+	)
+	last_seen = result.scalar_one()
 	
 	return MinecraftPlayerProfile(
 		uuid=user.uuid,
