@@ -214,7 +214,8 @@ async def get_leaderboard(
 				username=player.username,
 				level=player.level,
 				xp=player.xp,
-				avatar=player.avatar
+				avatar=player.avatar,
+				selected_badge_id=player.selected_badge_id
 			)
 			for player in players
 		]
