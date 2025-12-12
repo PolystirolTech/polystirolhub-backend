@@ -17,6 +17,7 @@ class User(Base):
 	is_super_admin = Column(Boolean, default=False, nullable=False)
 	xp = Column(Integer, default=0, nullable=False)
 	level = Column(Integer, default=1, nullable=False)
+	balance = Column(Integer, default=0, nullable=False)
 	created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 	oauth_accounts = relationship("OAuthAccount", back_populates="user", cascade="all, delete-orphan")

@@ -30,6 +30,15 @@ async def get_progression(
 	return progression
 
 
+@router.get("/me/balance")
+async def get_balance(
+	current_user: User = Depends(deps.get_current_user),
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""Получить текущий баланс пользователя"""
+	return {"balance": current_user.balance}
+
+
 @router.post("/me/award-xp")
 async def award_xp_to_user(
 	request: AwardXPRequest,

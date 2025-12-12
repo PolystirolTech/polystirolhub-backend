@@ -4,6 +4,7 @@
 Формулы:
 - E(L) = ⌈L/10⌉ × 100 XP - дополнительный опыт для перехода от уровня L-1 к уровню L
 - TotalXP(N) = Σ(L=1 to N) E(L) - общий опыт, требуемый для достижения уровня N
+- C(L) = ⌈L/10⌉ × 100 - валюта, начисляемая при достижении уровня L
 """
 import math
 from typing import Dict
@@ -28,6 +29,23 @@ def calculate_e_for_level(level: int) -> int:
 	if level < 1:
 		return 0
 	return math.ceil(level / 10) * 100
+
+
+def calculate_currency_for_level(level: int) -> int:
+	"""
+	Рассчитывает количество валюты C(L), начисляемое при достижении уровня L.
+	
+	Формула: C(L) = ⌈L/10⌉ × 100
+	
+	Args:
+		level: Достигнутый уровень
+		
+	Returns:
+		Количество валюты, начисляемое при достижении указанного уровня
+	"""
+	if level < 1:
+		return 0
+	return math.ceil(level / 10) * 50
 
 
 def calculate_total_xp_for_level(level: int) -> int:
@@ -158,6 +176,8 @@ async def award_xp(
 			"total_xp": user.xp,
 			"xp_awarded": 0,
 			"level_increased": False,
+			"currency_awarded": 0,
+			"levels_gained": 0,
 			"progression": progression
 		}
 	
@@ -183,10 +203,24 @@ async def award_xp(
 	user.xp = new_xp
 	user.level = new_level
 	
+	# Начисляем валюту за повышение уровня
+	level_increased = new_level > old_level
+	currency_awarded = 0
+	levels_gained = 0
+	
+	if level_increased:
+		# Начисляем валюту за каждый пропущенный уровень
+		for level in range(old_level + 1, new_level + 1):
+			currency_for_level = calculate_currency_for_level(level)
+			currency_awarded += currency_for_level
+			levels_gained += 1
+		
+		# Начисляем валюту напрямую (в той же транзакции)
+		user.balance += currency_awarded
+	
 	await db.commit()
 	await db.refresh(user)
 	
-	level_increased = new_level > old_level
 	progression = get_progression_info(new_xp)
 	
 	return {
@@ -196,5 +230,7 @@ async def award_xp(
 		"level_increased": level_increased,
 		"old_level": old_level,
 		"old_xp": old_xp,
+		"currency_awarded": currency_awarded,
+		"levels_gained": levels_gained,
 		"progression": progression
 	}
