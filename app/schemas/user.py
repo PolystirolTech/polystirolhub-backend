@@ -12,6 +12,7 @@ class UserBase(BaseModel):
     is_super_admin: Optional[bool] = False
     xp: Optional[int] = 0
     level: Optional[int] = 1
+    selected_badge_id: Optional[UUID] = None
 
 class UserCreate(UserBase):
     pass
@@ -67,6 +68,7 @@ class LeaderboardPlayer(BaseModel):
     level: int
     xp: int
     avatar: Optional[str] = None
+    selected_badge_id: Optional[UUID] = None
 
     class Config:
         from_attributes = True

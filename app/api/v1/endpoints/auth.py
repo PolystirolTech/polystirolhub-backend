@@ -653,6 +653,7 @@ async def get_current_user_info(current_user: User = Depends(deps.get_current_us
         "is_active": current_user.is_active,
         "is_admin": current_user.is_admin,
         "is_super_admin": current_user.is_super_admin,
+        "selected_badge_id": str(current_user.selected_badge_id) if current_user.selected_badge_id else None,
         "created_at": current_user.created_at.isoformat()
     }
 
@@ -736,6 +737,7 @@ async def upload_avatar(
         "username": current_user.username,
         "avatar": current_user.avatar,
         "is_active": current_user.is_active,
+        "selected_badge_id": str(current_user.selected_badge_id) if current_user.selected_badge_id else None,
         "created_at": current_user.created_at.isoformat()
     }
 
@@ -799,6 +801,7 @@ async def update_current_user(
         "username": current_user.username,
         "avatar": current_user.avatar,
         "is_active": current_user.is_active,
+        "selected_badge_id": str(current_user.selected_badge_id) if current_user.selected_badge_id else None,
         "created_at": current_user.created_at.isoformat()
     }
 

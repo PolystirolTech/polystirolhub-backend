@@ -48,6 +48,9 @@ class Settings(BaseSettings):
 	# Banners storage
 	STORAGE_BANNERS_LOCAL_PATH: str = "uploads/banners"  # Путь для локального хранения баннеров
 	STORAGE_BANNERS_BASE_URL: str = "/static/banners"  # Базовый URL для доступа к баннерам
+	# Badges storage
+	STORAGE_BADGES_LOCAL_PATH: str = "uploads/badges"  # Путь для локального хранения бэджиков
+	STORAGE_BADGES_BASE_URL: str = "/static/badges"  # Базовый URL для доступа к бэджикам
 	# S3 настройки (для будущего использования)
 	STORAGE_S3_BUCKET: str = ""
 	STORAGE_S3_REGION: str = "us-east-1"

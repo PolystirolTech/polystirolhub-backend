@@ -22,6 +22,8 @@ class User(Base):
 
 	oauth_accounts = relationship("OAuthAccount", back_populates="user", cascade="all, delete-orphan")
 	external_links = relationship("ExternalLink", back_populates="user", cascade="all, delete-orphan")
+	user_badges = relationship("UserBadge", back_populates="user", cascade="all, delete-orphan")
+	selected_badge_id = Column(UUID(as_uuid=True), ForeignKey("badges.id"), nullable=True)
 
 class OAuthAccount(Base):
 	__tablename__ = "oauth_accounts"
