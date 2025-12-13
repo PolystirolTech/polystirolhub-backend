@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from app.api import deps
 from app.models.user import User, ExternalLink
 from app.models.badge import Badge as BadgeModel, UserBadge, BadgeType
+from app.models.statistics import MinecraftUser
 from app.schemas.badge import (
 	Badge,
 	UserBadgeWithBadge,
@@ -201,6 +202,18 @@ async def get_minecraft_player_selected_badge(
 			detail="Invalid player UUID format"
 		)
 	
+	# Сначала проверяем, существует ли игрок в MinecraftUser
+	result = await db.execute(
+		select(MinecraftUser).where(MinecraftUser.uuid == player_uuid)
+	)
+	minecraft_user = result.scalar_one_or_none()
+	
+	if not minecraft_user:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail="Player not found"
+		)
+	
 	# Поиск ExternalLink с platform="minecraft" и external_id=player_uuid
 	result = await db.execute(
 		select(ExternalLink)
@@ -214,19 +227,14 @@ async def get_minecraft_player_selected_badge(
 	)
 	external_link = result.scalar_one_or_none()
 	
+	# Если нет связи с User, значит у игрока нет бэйджика
 	if not external_link:
-		raise HTTPException(
-			status_code=status.HTTP_404_NOT_FOUND,
-			detail="Player not found"
-		)
+		return None
 	
 	# Получаем User
 	user = external_link.user
 	if not user:
-		raise HTTPException(
-			status_code=status.HTTP_404_NOT_FOUND,
-			detail="User not found"
-		)
+		return None
 	
 	# Проверяем selected_badge_id
 	if not user.selected_badge_id:
