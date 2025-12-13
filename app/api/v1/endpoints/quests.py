@@ -9,8 +9,6 @@ from app.models.user import User
 from app.models.quest import Quest as QuestModel, UserQuest, QuestType
 from app.schemas.quest import (
 	Quest,
-	QuestCreate,
-	QuestUpdate,
 	UserQuestWithQuest
 )
 from app.services.quest_progress import initialize_daily_quests_for_user, initialize_achievement_quests_for_user
@@ -30,7 +28,7 @@ async def get_quests(
 	"""Публичный список всех активных квестов"""
 	result = await db.execute(
 		select(QuestModel)
-		.where(QuestModel.is_active == True)
+		.where(QuestModel.is_active)
 		.order_by(QuestModel.created_at.desc())
 	)
 	quests = result.scalars().all()
@@ -197,6 +195,7 @@ async def update_quest(
 	condition_key: Optional[str] = Form(None),
 	target_value: Optional[int] = Form(None),
 	reward_xp: Optional[int] = Form(None),
+	reward_balance: Optional[int] = Form(None),
 	is_active: Optional[bool] = Form(None),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)

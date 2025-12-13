@@ -1,16 +1,15 @@
 """
 Сервис для работы с прогрессом и выдачей бейджей.
 """
-from typing import Optional, Dict
+from typing import Optional
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, delete
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, and_, delete
 import logging
 
 from app.models.badge import Badge, UserBadge, UserBadgeProgress
-from app.models.user import User, ExternalLink
+from app.models.user import ExternalLink
 from app.core.progression import award_xp
 from app.core.currency import add_currency
 
@@ -317,7 +316,7 @@ async def check_periodic_badges(db: AsyncSession) -> None:
 	"""
 	# Находим все бейджи с auto_check=True
 	result = await db.execute(
-		select(Badge).where(Badge.auto_check == True)
+		select(Badge).where(Badge.auto_check)
 	)
 	badges = result.scalars().all()
 	

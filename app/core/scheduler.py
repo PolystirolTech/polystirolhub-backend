@@ -4,7 +4,6 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import logging
 
@@ -33,7 +32,7 @@ async def initialize_daily_quests_job():
 		async with AsyncSessionLocal() as db:
 			# Получаем всех активных пользователей
 			result = await db.execute(
-				select(User).where(User.is_active == True)
+				select(User).where(User.is_active)
 			)
 			users = result.scalars().all()
 			

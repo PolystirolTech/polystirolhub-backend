@@ -40,7 +40,7 @@ async def update_progress(
 		select(Quest).where(
 			and_(
 				Quest.condition_key == condition_key,
-				Quest.is_active == True
+				Quest.is_active
 			)
 		)
 	)
@@ -209,7 +209,7 @@ async def initialize_daily_quests_for_user(
 		select(Quest).where(
 			and_(
 				Quest.quest_type == QuestType.daily,
-				Quest.is_active == True
+				Quest.is_active
 			)
 		)
 	)
@@ -274,7 +274,7 @@ async def initialize_achievement_quests_for_user(
 		select(Quest).where(
 			and_(
 				Quest.quest_type == QuestType.achievement,
-				Quest.is_active == True
+				Quest.is_active
 			)
 		)
 	)

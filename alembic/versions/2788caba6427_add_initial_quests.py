@@ -6,8 +6,6 @@ Create Date: 2025-12-14 00:06:26.086062
 
 """
 from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 import uuid
 
 

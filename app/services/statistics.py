@@ -663,7 +663,6 @@ async def process_statistics_batch(
 				from datetime import datetime, timezone, date as date_type
 				from app.services.badge_progress import get_user_id_from_minecraft_uuid
 				from app.services.quest_progress import update_progress as update_quest_progress
-				from sqlalchemy import func
 				
 				today = date_type.today()
 				today_start = int(datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc).timestamp() * 1000)

@@ -3,13 +3,11 @@
 """
 from typing import Optional, Dict, Any
 from uuid import UUID
-from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc
 import logging
 
 from app.models.user import User
-from app.models.badge import Badge, UserBadge
 from app.services.badge_progress import extend_or_award_badge
 
 logger = logging.getLogger(__name__)
