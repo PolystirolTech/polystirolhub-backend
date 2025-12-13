@@ -45,7 +45,7 @@ async def generate_resource_pack(
 		game_server_id: ID игрового сервера для обновления
 	
 	Returns:
-		Tuple (url, hash) - публичный URL ресурс-пака и его SHA256 хэш
+		Tuple (url, hash) - публичный URL ресурс-пака и его SHA1 хэш
 	"""
 	# Получаем все баджи из БД
 	result = await db.execute(select(BadgeModel).order_by(BadgeModel.created_at))
@@ -145,8 +145,8 @@ async def generate_resource_pack(
 	# Получаем данные ZIP архива
 	zip_data = zip_buffer.getvalue()
 	
-	# Вычисляем SHA256 хэш
-	hash_obj = hashlib.sha256(zip_data)
+	# Вычисляем SHA1 хэш
+	hash_obj = hashlib.sha1(zip_data)
 	pack_hash = hash_obj.hexdigest()
 	
 	# Сохраняем в storage

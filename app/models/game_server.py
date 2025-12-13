@@ -26,7 +26,7 @@ class GameServer(Base):
 	ip = Column(String, nullable=False)
 	port = Column(Integer, nullable=True)
 	resource_pack_url = Column(String, nullable=True)  # Публичный URL ресурс-пака с баджами
-	resource_pack_hash = Column(String, nullable=True)  # SHA256 хэш ресурс-пака
+	resource_pack_hash = Column(String, nullable=True)  # SHA1 хэш ресурс-пака
 	created_at = Column(DateTime(timezone=True), server_default=func.now())
 	updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
