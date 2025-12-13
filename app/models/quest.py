@@ -20,6 +20,7 @@ class Quest(Base):
 	condition_key = Column(String, nullable=False, index=True)
 	target_value = Column(Integer, nullable=False)
 	reward_xp = Column(Integer, default=0, nullable=False)
+	reward_balance = Column(Integer, default=0, nullable=False)
 	is_active = Column(Boolean, default=True, nullable=False, index=True)
 	created_at = Column(DateTime(timezone=True), server_default=func.now())
 

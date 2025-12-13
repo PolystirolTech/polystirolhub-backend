@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, status, UploadFile, File
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, and_
 from app.api import deps
 from app.core.config import settings
 from app.core.security import create_access_token, create_refresh_token
@@ -513,6 +513,24 @@ async def callback(
                 )
                 db.add(new_oauth)
                 await db.commit()
+                
+                # Обновляем прогресс для link_all_platforms
+                try:
+                    from app.services.quest_progress import update_progress as update_quest_progress
+                    # Подсчитываем количество привязанных OAuth провайдеров (twitch, discord, steam)
+                    result = await db.execute(
+                        select(OAuthAccount).where(
+                            and_(
+                                OAuthAccount.user_id == user.id,
+                                OAuthAccount.provider.in_(["twitch", "discord", "steam"])
+                            )
+                        )
+                    )
+                    linked_providers = result.scalars().all()
+                    linked_count = len(linked_providers)
+                    await update_quest_progress("link_all_platforms", user.id, 0, db, absolute_value=linked_count)
+                except Exception as e:
+                    logger.error(f"Error updating quest progress for link_all_platforms: {e}")
                 
             # Return success - DO NOT create JWT tokens for linking
             success_params = urlencode({"success": "true"})

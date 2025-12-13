@@ -382,9 +382,23 @@ async def process_statistics_batch(
 							user_id = await get_user_id_from_minecraft_uuid(session_data.uuid, db)
 							if user_id:
 								await update_progress("deaths_in_session", user_id, session_data.deaths, db)
+								# Обновляем прогресс квестов
+								from app.services.quest_progress import update_progress as update_quest_progress
+								await update_quest_progress("deaths_in_session", user_id, session_data.deaths, db)
 						except Exception as e:
-							logger.error(f"Error updating badge progress for deaths_in_session: {e}")
+							logger.error(f"Error updating badge/quest progress for deaths_in_session: {e}")
 							# Не добавляем в errors, т.к. это не критично для обработки статистики
+					
+					# Обновляем прогресс для server_join (при создании новой сессии)
+					if not session:
+						try:
+							from app.services.badge_progress import get_user_id_from_minecraft_uuid
+							from app.services.quest_progress import update_progress as update_quest_progress
+							user_id = await get_user_id_from_minecraft_uuid(session_data.uuid, db)
+							if user_id:
+								await update_quest_progress("server_join", user_id, 1, db)
+						except Exception as e:
+							logger.error(f"Error updating quest progress for server_join: {e}")
 				except Exception as e:
 					errors.append(f"Error processing session for {session_data.uuid}: {e}")
 					logger.error(f"Error processing session for {session_data.uuid}: {e}")
@@ -642,6 +656,51 @@ async def process_statistics_batch(
 				except Exception as e:
 					errors.append(f"Error processing geolocation for {geo_data.uuid}: {e}")
 					logger.error(f"Error processing geolocation for {geo_data.uuid}: {e}")
+		
+		# Обновляем прогресс для playtime_daily (суммируем playtime за день для каждого пользователя)
+		if batch.sessions:
+			try:
+				from datetime import datetime, timezone, date as date_type
+				from app.services.badge_progress import get_user_id_from_minecraft_uuid
+				from app.services.quest_progress import update_progress as update_quest_progress
+				from sqlalchemy import func
+				
+				today = date_type.today()
+				today_start = int(datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc).timestamp() * 1000)
+				today_end = int(datetime.combine(today, datetime.max.time()).replace(tzinfo=timezone.utc).timestamp() * 1000)
+				
+				# Группируем сессии по user_id и суммируем playtime за сегодня
+				user_playtime_map = {}  # user_id -> total_playtime_seconds
+				
+				for session_data in batch.sessions:
+					try:
+						user_id = await get_user_id_from_minecraft_uuid(session_data.uuid, db)
+						if not user_id:
+							continue
+						
+						# Проверяем, что сессия в пределах сегодня
+						if session_data.session_start < today_start or session_data.session_start > today_end:
+							continue
+						
+						# Вычисляем playtime для этой сессии (в секундах)
+						session_end = session_data.session_end or int(datetime.now(timezone.utc).timestamp() * 1000)
+						playtime_ms = session_end - session_data.session_start - (session_data.afk_time or 0)
+						playtime_seconds = max(0, playtime_ms // 1000)
+						
+						if user_id not in user_playtime_map:
+							user_playtime_map[user_id] = 0
+						user_playtime_map[user_id] += playtime_seconds
+					except Exception as e:
+						logger.error(f"Error calculating playtime for session {session_data.uuid}: {e}")
+				
+				# Обновляем прогресс для каждого пользователя
+				for user_id, total_playtime in user_playtime_map.items():
+					try:
+						await update_quest_progress("playtime_daily", user_id, 0, db, absolute_value=total_playtime)
+					except Exception as e:
+						logger.error(f"Error updating quest progress for playtime_daily for user {user_id}: {e}")
+			except Exception as e:
+				logger.error(f"Error updating playtime_daily quest progress: {e}")
 		
 		# Коммитим все изменения
 		await db.commit()

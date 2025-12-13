@@ -15,6 +15,7 @@ class QuestBase(BaseModel):
 	condition_key: str
 	target_value: int
 	reward_xp: int = 0
+	reward_balance: int = 0
 	is_active: bool = True
 	
 	@field_validator('quest_type', mode='before')
@@ -37,6 +38,7 @@ class QuestUpdate(BaseModel):
 	condition_key: Optional[str] = None
 	target_value: Optional[int] = None
 	reward_xp: Optional[int] = None
+	reward_balance: Optional[int] = None
 	is_active: Optional[bool] = None
 
 class Quest(QuestBase):
