@@ -35,6 +35,7 @@ class BadgeUpdate(BaseModel):
 class Badge(BadgeBase):
 	id: UUID
 	image_url: str
+	unicode_char: Optional[str] = None
 	created_at: datetime
 
 	class Config:

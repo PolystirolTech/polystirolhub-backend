@@ -51,6 +51,9 @@ class Settings(BaseSettings):
 	# Badges storage
 	STORAGE_BADGES_LOCAL_PATH: str = "uploads/badges"  # Путь для локального хранения бэджиков
 	STORAGE_BADGES_BASE_URL: str = "/static/badges"  # Базовый URL для доступа к бэджикам
+	# Resource packs storage
+	STORAGE_RESOURCE_PACKS_LOCAL_PATH: str = "uploads/resource_packs"  # Путь для локального хранения ресурс-паков
+	STORAGE_RESOURCE_PACKS_BASE_URL: str = "/static/resource_packs"  # Базовый URL для доступа к ресурс-пакам
 	# S3 настройки (для будущего использования)
 	STORAGE_S3_BUCKET: str = ""
 	STORAGE_S3_REGION: str = "us-east-1"

@@ -12,8 +12,10 @@ from app.schemas.badge import (
 	UserBadgeWithBadge,
 	AwardBadgeRequest
 )
-from app.core.storage import get_badges_storage
+from app.core.storage import get_badges_storage, get_resource_packs_storage
 from app.core.config import settings
+from app.models.game_server import GameServer
+from app.services.resource_pack_generator import generate_unicode_char, generate_resource_pack
 from uuid import UUID
 import logging
 import uuid
@@ -324,9 +326,30 @@ async def create_badge(
 		image_url=image_url
 	)
 	
+	# Генерируем unicode_char для нового баджа перед сохранением
+	# Получаем количество существующих баджей (без нового)
+	badges_count_result = await db.execute(select(BadgeModel))
+	existing_badges_count = len(badges_count_result.scalars().all())
+	new_badge.unicode_char = generate_unicode_char(existing_badges_count)
+	
 	db.add(new_badge)
 	await db.commit()
 	await db.refresh(new_badge)
+	
+	# Генерируем ресурс-пак для всех GameServer'ов
+	try:
+		game_servers_result = await db.execute(select(GameServer))
+		game_servers = game_servers_result.scalars().all()
+		resource_packs_storage = get_resource_packs_storage()
+		
+		for game_server in game_servers:
+			try:
+				await generate_resource_pack(db, resource_packs_storage, game_server.id)
+			except Exception as e:
+				logger.error(f"Failed to generate resource pack for game server {game_server.id}: {e}", exc_info=True)
+	except Exception as e:
+		logger.error(f"Failed to generate resource packs: {e}", exc_info=True)
+		# Не прерываем выполнение, бадж создан успешно
 	
 	return new_badge
 
@@ -446,9 +469,30 @@ async def update_badge(
 		# Сохраняем новый файл
 		storage = get_badges_storage()
 		badge.image_url = await storage.save(file_content, file_name)
+		
+		# При обновлении изображения нужно перегенерировать ресурс-пак
+		image_updated = True
+	else:
+		image_updated = False
 	
 	await db.commit()
 	await db.refresh(badge)
+	
+	# Генерируем ресурс-пак для всех GameServer'ов если изображение было обновлено
+	if image_updated:
+		try:
+			game_servers_result = await db.execute(select(GameServer))
+			game_servers = game_servers_result.scalars().all()
+			resource_packs_storage = get_resource_packs_storage()
+			
+			for game_server in game_servers:
+				try:
+					await generate_resource_pack(db, resource_packs_storage, game_server.id)
+				except Exception as e:
+					logger.error(f"Failed to generate resource pack for game server {game_server.id}: {e}", exc_info=True)
+		except Exception as e:
+			logger.error(f"Failed to generate resource packs: {e}", exc_info=True)
+			# Не прерываем выполнение, бадж обновлен успешно
 	
 	return badge
 
@@ -507,6 +551,21 @@ async def delete_badge(
 	# Удаляем бэйджик
 	await db.execute(delete(BadgeModel).where(BadgeModel.id == badge_id))
 	await db.commit()
+	
+	# Перегенерируем ресурс-пак для всех GameServer'ов после удаления баджа
+	try:
+		game_servers_result = await db.execute(select(GameServer))
+		game_servers = game_servers_result.scalars().all()
+		resource_packs_storage = get_resource_packs_storage()
+		
+		for game_server in game_servers:
+			try:
+				await generate_resource_pack(db, resource_packs_storage, game_server.id)
+			except Exception as e:
+				logger.error(f"Failed to generate resource pack for game server {game_server.id}: {e}", exc_info=True)
+	except Exception as e:
+		logger.error(f"Failed to generate resource packs: {e}", exc_info=True)
+		# Не прерываем выполнение, бадж удален успешно
 	
 	return {"message": "Badge deleted successfully"}
 

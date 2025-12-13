@@ -29,6 +29,8 @@ class GameServerBase(BaseModel):
 	mods: list[str] = []
 	ip: str
 	port: Optional[int] = None
+	resource_pack_url: Optional[str] = None
+	resource_pack_hash: Optional[str] = None
 
 class GameServerCreate(GameServerBase):
 	pass
@@ -41,6 +43,8 @@ class GameServerUpdate(BaseModel):
 	mods: Optional[list[str]] = None
 	ip: Optional[str] = None
 	port: Optional[int] = None
+	resource_pack_url: Optional[str] = None
+	resource_pack_hash: Optional[str] = None
 
 class GameServerResponse(GameServerBase):
 	id: UUID

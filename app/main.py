@@ -74,6 +74,12 @@ if settings.STORAGE_BACKEND.lower() == "local":
 		badges_path = Path(__file__).parent.parent / badges_path
 	badges_path.mkdir(parents=True, exist_ok=True)
 	
+	# Создаем директорию для ресурс-паков если не существует
+	resource_packs_path = Path(settings.STORAGE_RESOURCE_PACKS_LOCAL_PATH)
+	if not resource_packs_path.is_absolute():
+		resource_packs_path = Path(__file__).parent.parent / resource_packs_path
+	resource_packs_path.mkdir(parents=True, exist_ok=True)
+	
 	# Mount для статических файлов
 	app.mount("/static", StaticFiles(directory=str(uploads_path.parent)), name="static")
 

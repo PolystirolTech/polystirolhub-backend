@@ -19,6 +19,7 @@ class Badge(Base):
 	description = Column(Text, nullable=True)
 	image_url = Column(String, nullable=False)
 	badge_type = Column(SQLEnum(BadgeType, name="badge_type"), nullable=False, default=BadgeType.permanent)
+	unicode_char = Column(String, nullable=True)  # Юникод символ в формате "E000" (без префикса \u)
 	created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 	user_badges = relationship("UserBadge", back_populates="badge", cascade="all, delete-orphan")
