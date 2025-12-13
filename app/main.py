@@ -3,10 +3,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
+from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.api.v1.api import api_router
+from app.core.scheduler import start_scheduler, shutdown_scheduler
 
-app = FastAPI(title=settings.PROJECT_NAME)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+	"""Управление жизненным циклом приложения."""
+	# Startup
+	start_scheduler()
+	yield
+	# Shutdown
+	shutdown_scheduler()
+
+
+app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
 
 class TokenRefreshMiddleware(BaseHTTPMiddleware):
     """Middleware to set refreshed tokens in cookies if they were refreshed"""

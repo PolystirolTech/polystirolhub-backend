@@ -167,8 +167,21 @@ async def deselect_badge(
 	
 	return {"message": "Badge deselected successfully"}
 
+@router.get("/badges/conditions")
+async def get_available_conditions(
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""
+	Возвращает список всех доступных condition_key с описаниями.
+	Доступно всем пользователям для понимания возможных условий.
+	"""
+	from app.core.badge_conditions import get_available_conditions
+	
+	conditions = get_available_conditions()
+	return conditions
+
 # ========== Публичные эндпоинты (продолжение) ==========
-# ВАЖНО: Этот эндпоинт должен быть ПОСЛЕ /badges/me, иначе FastAPI будет интерпретировать "me" как badge_id
+# ВАЖНО: Этот эндпоинт должен быть ПОСЛЕ /badges/me и /badges/conditions, иначе FastAPI будет интерпретировать их как badge_id
 
 @router.get("/badges/{badge_id}", response_model=Badge)
 async def get_badge(
@@ -280,6 +293,12 @@ async def create_badge(
 	description: Optional[str] = Form(None),
 	badge_type: str = Form(...),
 	image: UploadFile = File(...),
+	condition_key: Optional[str] = Form(None),
+	target_value: Optional[int] = Form(None),
+	auto_check: Optional[bool] = Form(False),
+	reward_xp: Optional[int] = Form(0),
+	reward_balance: Optional[int] = Form(0),
+	unicode_char: Optional[str] = Form(None),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
 ):
@@ -310,6 +329,30 @@ async def create_badge(
 			detail=f"Invalid badge_type. Allowed values: {', '.join([bt.value for bt in BadgeType])}"
 		)
 	
+	# Валидация condition_key если указан
+	if condition_key:
+		from app.core.badge_conditions import is_condition_valid, get_condition_info
+		if not is_condition_valid(condition_key):
+			available_keys = ", ".join(["xp_leader", "deaths_in_session", "playtime_leader_season", "messages_sent"])
+			raise HTTPException(
+				status_code=400,
+				detail=f"Invalid condition_key. Available values: {available_keys}. Use GET /api/v1/badges/conditions for details."
+			)
+		
+		# Проверяем требования условия
+		condition_info = get_condition_info(condition_key)
+		if condition_info:
+			if condition_info.get("requires_target_value") and not target_value:
+				raise HTTPException(
+					status_code=400,
+					detail=f"condition_key '{condition_key}' requires target_value to be set"
+				)
+			if condition_info.get("requires_auto_check") and not auto_check:
+				raise HTTPException(
+					status_code=400,
+					detail=f"condition_key '{condition_key}' requires auto_check to be True"
+				)
+	
 	# Определяем расширение файла
 	content_type_to_ext = {
 		"image/jpeg": "jpg",
@@ -331,14 +374,21 @@ async def create_badge(
 		name=name,
 		description=description,
 		badge_type=badge_type_enum,
-		image_url=image_url
+		image_url=image_url,
+		condition_key=condition_key,
+		target_value=target_value,
+		auto_check=auto_check if auto_check is not None else False,
+		reward_xp=reward_xp if reward_xp is not None else 0,
+		reward_balance=reward_balance if reward_balance is not None else 0,
+		unicode_char=unicode_char
 	)
 	
-	# Генерируем unicode_char для нового баджа перед сохранением
-	# Получаем количество существующих баджей (без нового)
-	badges_count_result = await db.execute(select(BadgeModel))
-	existing_badges_count = len(badges_count_result.scalars().all())
-	new_badge.unicode_char = generate_unicode_char(existing_badges_count)
+	# Генерируем unicode_char для нового баджа перед сохранением, если не указан
+	if not new_badge.unicode_char:
+		# Получаем количество существующих баджей (без нового)
+		badges_count_result = await db.execute(select(BadgeModel))
+		existing_badges_count = len(badges_count_result.scalars().all())
+		new_badge.unicode_char = generate_unicode_char(existing_badges_count)
 	
 	db.add(new_badge)
 	await db.commit()
@@ -400,6 +450,12 @@ async def update_badge(
 	description: Optional[str] = Form(None),
 	badge_type: Optional[str] = Form(None),
 	image: Optional[UploadFile] = File(None),
+	condition_key: Optional[str] = Form(None),
+	target_value: Optional[int] = Form(None),
+	auto_check: Optional[bool] = Form(None),
+	reward_xp: Optional[int] = Form(None),
+	reward_balance: Optional[int] = Form(None),
+	unicode_char: Optional[str] = Form(None),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
 ):
@@ -428,6 +484,18 @@ async def update_badge(
 				status_code=400,
 				detail=f"Invalid badge_type. Allowed values: {', '.join([bt.value for bt in BadgeType])}"
 			)
+	if condition_key is not None:
+		badge.condition_key = condition_key
+	if target_value is not None:
+		badge.target_value = target_value
+	if auto_check is not None:
+		badge.auto_check = auto_check
+	if reward_xp is not None:
+		badge.reward_xp = reward_xp
+	if reward_balance is not None:
+		badge.reward_balance = reward_balance
+	if unicode_char is not None:
+		badge.unicode_char = unicode_char
 	
 	# Обрабатываем новое изображение если загружено
 	if image:
@@ -697,4 +765,64 @@ async def revoke_badge(
 	await db.commit()
 	
 	return {"message": "Badge revoked successfully"}
+
+@router.post("/admin/badges/check-periodic")
+async def check_periodic_badges_endpoint(
+	current_user: User = Depends(deps.get_current_admin),
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""Ручной запуск проверки периодических бейджей (только для админов)"""
+	from app.services.badge_progress import check_periodic_badges
+	
+	try:
+		await check_periodic_badges(db)
+		return {"message": "Periodic badge check completed successfully"}
+	except Exception as e:
+		raise HTTPException(
+			status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+			detail=f"Error during periodic badge check: {str(e)}"
+		)
+
+@router.post("/admin/badges/{badge_id}/check/{user_id}")
+async def check_badge_for_user(
+	badge_id: UUID,
+	user_id: UUID,
+	current_user: User = Depends(deps.get_current_admin),
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""Проверка конкретного бейджа для пользователя (только для админов)"""
+	from app.services.badge_progress import check_badge_completion
+	
+	# Проверяем существование бейджа
+	badge_result = await db.execute(
+		select(BadgeModel).where(BadgeModel.id == badge_id)
+	)
+	badge = badge_result.scalars().first()
+	
+	if not badge:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail="Badge not found"
+		)
+	
+	# Проверяем существование пользователя
+	user_result = await db.execute(
+		select(User).where(User.id == user_id)
+	)
+	user = user_result.scalars().first()
+	
+	if not user:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail="User not found"
+		)
+	
+	# Проверяем выполнение условия
+	is_completed = await check_badge_completion(user_id, badge_id, db)
+	
+	return {
+		"user_id": str(user_id),
+		"badge_id": str(badge_id),
+		"is_completed": is_completed
+	}
 

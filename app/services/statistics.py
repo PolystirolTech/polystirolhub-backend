@@ -374,6 +374,17 @@ async def process_statistics_batch(
 					session_key = (user_id_map[session_data.uuid], session_data.session_start)
 					session_id_map[session_key] = session.id
 					processed["sessions"] += 1
+					
+					# Проверяем бейджи для deaths_in_session
+					if session_data.deaths and session_data.deaths >= 30:
+						try:
+							from app.services.badge_progress import get_user_id_from_minecraft_uuid, update_progress
+							user_id = await get_user_id_from_minecraft_uuid(session_data.uuid, db)
+							if user_id:
+								await update_progress("deaths_in_session", user_id, session_data.deaths, db)
+						except Exception as e:
+							logger.error(f"Error updating badge progress for deaths_in_session: {e}")
+							# Не добавляем в errors, т.к. это не критично для обработки статистики
 				except Exception as e:
 					errors.append(f"Error processing session for {session_data.uuid}: {e}")
 					logger.error(f"Error processing session for {session_data.uuid}: {e}")

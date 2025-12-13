@@ -16,3 +16,4 @@ email-validator
 itsdangerous
 mcstatus
 Pillow
+apscheduler
