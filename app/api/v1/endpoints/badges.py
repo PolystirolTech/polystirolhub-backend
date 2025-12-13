@@ -214,13 +214,13 @@ async def get_minecraft_player_selected_badge(
 			detail="Player not found"
 		)
 	
-	# Поиск ExternalLink с platform="minecraft" и external_id=player_uuid
+	# Поиск ExternalLink с platform="MC" и external_id=player_uuid
 	result = await db.execute(
 		select(ExternalLink)
 		.options(selectinload(ExternalLink.user))
 		.where(
 			and_(
-				ExternalLink.platform == "minecraft",
+				ExternalLink.platform == "MC",
 				ExternalLink.external_id == player_uuid
 			)
 		)

@@ -178,7 +178,7 @@ async def link_player_to_user(
 	result = await db.execute(
 		select(ExternalLink).where(
 			and_(
-				ExternalLink.platform == "minecraft",
+				ExternalLink.platform == "MC",
 				ExternalLink.external_id == player_uuid
 			)
 		)
