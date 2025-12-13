@@ -65,6 +65,8 @@ class GameServerPublic(BaseModel):
 	mods: list[str]
 	ip: str
 	port: Optional[int] = None
+	resource_pack_url: Optional[str] = None
+	resource_pack_hash: Optional[str] = None
 	created_at: datetime
 	updated_at: datetime
 
