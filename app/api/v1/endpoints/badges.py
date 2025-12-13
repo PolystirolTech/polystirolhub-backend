@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 from typing import Optional
 from datetime import datetime, timezone
 from app.api import deps
-from app.models.user import User
+from app.models.user import User, ExternalLink
 from app.models.badge import Badge as BadgeModel, UserBadge, BadgeType
 from app.schemas.badge import (
 	Badge,
@@ -183,6 +183,82 @@ async def get_badge(
 			status_code=status.HTTP_404_NOT_FOUND,
 			detail="Badge not found"
 		)
+	
+	return badge
+
+@router.get("/badges/minecraft/{player_uuid}", response_model=Optional[Badge])
+async def get_minecraft_player_selected_badge(
+	player_uuid: str,
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""Получить выбранный бэджик игрока Minecraft по его UUID"""
+	# Валидация UUID формата (36 символов)
+	if len(player_uuid) != 36:
+		raise HTTPException(
+			status_code=status.HTTP_400_BAD_REQUEST,
+			detail="Invalid player UUID format"
+		)
+	
+	# Поиск ExternalLink с platform="minecraft" и external_id=player_uuid
+	result = await db.execute(
+		select(ExternalLink)
+		.options(selectinload(ExternalLink.user))
+		.where(
+			and_(
+				ExternalLink.platform == "minecraft",
+				ExternalLink.external_id == player_uuid
+			)
+		)
+	)
+	external_link = result.scalar_one_or_none()
+	
+	if not external_link:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail="Player not found"
+		)
+	
+	# Получаем User
+	user = external_link.user
+	if not user:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail="User not found"
+		)
+	
+	# Проверяем selected_badge_id
+	if not user.selected_badge_id:
+		return None
+	
+	# Получаем Badge по selected_badge_id
+	badge_result = await db.execute(
+		select(BadgeModel).where(BadgeModel.id == user.selected_badge_id)
+	)
+	badge = badge_result.scalar_one_or_none()
+	
+	if not badge:
+		# Если badge не найден, возвращаем null
+		return None
+	
+	# Проверяем, что у пользователя есть UserBadge с этим badge_id
+	now = datetime.now(timezone.utc)
+	user_badge_result = await db.execute(
+		select(UserBadge).where(
+			and_(
+				UserBadge.user_id == user.id,
+				UserBadge.badge_id == user.selected_badge_id,
+				or_(
+					UserBadge.expires_at.is_(None),
+					UserBadge.expires_at > now
+				)
+			)
+		)
+	)
+	user_badge = user_badge_result.scalar_one_or_none()
+	
+	# Если UserBadge не найден или истек, возвращаем null
+	if not user_badge:
+		return None
 	
 	return badge
 
