@@ -76,6 +76,9 @@ def calculate_level_from_xp(total_xp: int) -> int:
 	"""
 	Определяет текущий уровень пользователя на основе общего опыта.
 	
+	Логика: если total_xp >= минимальный XP для уровня N, то пользователь на уровне N.
+	Например: для уровня 2 минимальный XP = 100 (E(1) = 100), поэтому при 100 XP пользователь на уровне 2.
+	
 	Args:
 		total_xp: Общий опыт пользователя
 		
@@ -87,13 +90,18 @@ def calculate_level_from_xp(total_xp: int) -> int:
 	
 	level = 1
 	while True:
-		xp_for_next_level = calculate_total_xp_for_level(level + 1)
-		if total_xp < xp_for_next_level:
+		# Минимальный XP для следующего уровня = сумма E(1) до E(level)
+		# Для уровня 2 это E(1) = 100, для уровня 3 это E(1) + E(2) = 200
+		xp_for_next_level = calculate_total_xp_for_level(level)
+		# Если XP достиг или превысил минимальный для следующего уровня, переходим на него
+		if total_xp >= xp_for_next_level:
+			level += 1
+			# Защита от бесконечного цикла (максимальный уровень 1000)
+			if level > 1000:
+				return 1000
+		else:
+			# Если XP меньше минимального для следующего уровня, остаемся на текущем
 			return level
-		level += 1
-		# Защита от бесконечного цикла (максимальный уровень 1000)
-		if level > 1000:
-			return 1000
 
 
 def get_progression_info(total_xp: int) -> Dict:
@@ -107,24 +115,33 @@ def get_progression_info(total_xp: int) -> Dict:
 		Словарь с информацией о прогрессе:
 		- level: текущий уровень
 		- total_xp: общий опыт
-		- xp_for_current_level: XP, требуемый для текущего уровня
-		- xp_for_next_level: XP, требуемый для следующего уровня
+		- xp_for_current_level: XP, требуемый для текущего уровня (начало уровня)
+		- xp_for_next_level: XP, требуемый для следующего уровня (конец текущего уровня)
 		- xp_progress: XP, накопленный на текущем уровне (от начала уровня)
 		- xp_needed: XP, необходимое для следующего уровня
 		- progress_percent: процент прогресса до следующего уровня (0-100)
 	"""
 	current_level = calculate_level_from_xp(total_xp)
-	xp_for_current_level = calculate_total_xp_for_level(current_level)
-	xp_for_next_level = calculate_total_xp_for_level(current_level + 1)
+	# xp_for_current_level - это начало текущего уровня (минимальный XP для текущего уровня)
+	# Для уровня 1 это 0, для уровня 2 это 100 (E(1)), для уровня 3 это 200 (E(1)+E(2))
+	xp_for_current_level = calculate_total_xp_for_level(current_level - 1) if current_level > 1 else 0
+	# xp_for_next_level - это конец текущего уровня (минимальный XP для следующего уровня)
+	# Для уровня 1 это 100, для уровня 2 это 200, для уровня 3 это 300
+	xp_for_next_level = calculate_total_xp_for_level(current_level)
 	
 	xp_progress = total_xp - xp_for_current_level
 	xp_needed = xp_for_next_level - total_xp
-	e_for_next = calculate_e_for_level(current_level + 1)
+	# e_for_next - это E для следующего уровня (сколько XP нужно для перехода на следующий уровень)
+	# Для уровня 1 это E(2)=100, для уровня 2 это E(3)=100
+	e_for_next = calculate_e_for_level(current_level)
 	
 	if e_for_next > 0:
 		progress_percent = (xp_progress / e_for_next) * 100
 	else:
 		progress_percent = 100.0
+	
+	# Ограничиваем процент прогресса от 0 до 100
+	progress_percent = max(0, min(100, progress_percent))
 	
 	return {
 		"level": current_level,
