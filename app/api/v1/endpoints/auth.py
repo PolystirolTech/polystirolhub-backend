@@ -9,7 +9,7 @@ from app.core.storage import get_storage
 from app.models.user import User, OAuthAccount, ExternalLink
 from app.schemas.user import UserUpdate, OAuthAccountPublic
 from app.schemas.link import LinkCodeGenerateResponse, LinkRequest, LinkResponse, LinkStatusResponse, ExternalLinkResponse
-from app.db.redis import save_refresh_token, get_refresh_token, delete_refresh_token, save_link_code, get_link_code, delete_link_code
+from app.db.redis import save_refresh_token, get_refresh_token, delete_refresh_token, save_link_code, get_link_code, delete_link_code, acquire_lock, release_lock
 import httpx
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
@@ -865,60 +865,81 @@ async def refresh(
             detail="Invalid or expired refresh token"
         )
     
-    # Get user from database
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalars().first()
+    # Use lock to prevent race condition when multiple requests try to refresh simultaneously
+    lock_key = f"token_refresh_lock:{user_id}"
+    lock_acquired = await acquire_lock(lock_key, timeout=10)
     
-    if not user:
-        # Clean up invalid token
-        await delete_refresh_token(refresh_token_value)
+    if not lock_acquired:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Token refresh in progress, please try again"
         )
     
-    # Refresh OAuth tokens if needed
-    max_expires_at, _ = await refresh_oauth_token_if_needed(user, db)
-    
-    # Create new tokens (rotation)
-    new_access_token = create_access_token(subject=user.id)
-    new_refresh_token = create_refresh_token()
-    
-    # Calculate new refresh token TTL
-    min_refresh_ttl = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
-    refresh_ttl = min_refresh_ttl
-    
-    if max_expires_at:
-        oauth_ttl = int((max_expires_at - datetime.now(timezone.utc)).total_seconds())
-        if oauth_ttl > refresh_ttl:
-            refresh_ttl = oauth_ttl
-    
-    # Delete old refresh token and save new one
-    await delete_refresh_token(refresh_token_value)
-    await save_refresh_token(str(user.id), new_refresh_token, refresh_ttl)
-    
-    # Update cookies
-    is_secure = settings.FRONTEND_URL.startswith("https")
-    
-    response.set_cookie(
-        key="access_token",
-        value=new_access_token,
-        httponly=True,
-        secure=is_secure,
-        samesite="lax",
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    )
-    
-    response.set_cookie(
-        key="refresh_token",
-        value=new_refresh_token,
-        httponly=True,
-        secure=is_secure,
-        samesite="lax",
-        max_age=refresh_ttl
-    )
-    
-    return {"message": "Tokens refreshed successfully"}
+    try:
+        # Verify refresh token still exists (might have been refreshed by another request)
+        current_user_id = await get_refresh_token(refresh_token_value)
+        if not current_user_id or current_user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token was already used"
+            )
+        
+        # Get user from database
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalars().first()
+        
+        if not user:
+            # Clean up invalid token
+            await delete_refresh_token(refresh_token_value)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found"
+            )
+        
+        # Refresh OAuth tokens if needed
+        max_expires_at, _ = await refresh_oauth_token_if_needed(user, db)
+        
+        # Create new tokens (rotation)
+        new_access_token = create_access_token(subject=user.id)
+        new_refresh_token = create_refresh_token()
+        
+        # Calculate new refresh token TTL
+        min_refresh_ttl = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+        refresh_ttl = min_refresh_ttl
+        
+        if max_expires_at:
+            oauth_ttl = int((max_expires_at - datetime.now(timezone.utc)).total_seconds())
+            if oauth_ttl > refresh_ttl:
+                refresh_ttl = oauth_ttl
+        
+        # Atomic swap: save new token BEFORE deleting old one
+        await save_refresh_token(str(user.id), new_refresh_token, refresh_ttl)
+        await delete_refresh_token(refresh_token_value)
+        
+        # Update cookies
+        is_secure = settings.FRONTEND_URL.startswith("https")
+        
+        response.set_cookie(
+            key="access_token",
+            value=new_access_token,
+            httponly=True,
+            secure=is_secure,
+            samesite="lax",
+            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        )
+        
+        response.set_cookie(
+            key="refresh_token",
+            value=new_refresh_token,
+            httponly=True,
+            secure=is_secure,
+            samesite="lax",
+            max_age=refresh_ttl
+        )
+        
+        return {"message": "Tokens refreshed successfully"}
+    finally:
+        await release_lock(lock_key)
 
 @router.post("/logout")
 async def logout(request: Request, response: Response):
