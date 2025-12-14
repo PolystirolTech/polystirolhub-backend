@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
+from sqlalchemy.orm import selectinload
 from typing import List
 from uuid import UUID
 from datetime import datetime, timezone
@@ -174,14 +175,15 @@ async def get_server_stats(
 	db: AsyncSession = Depends(deps.get_db)
 ):
 	"""Получает статистику сервера по ID из game_servers"""
-	# Получаем minecraft_server
+	# Получаем minecraft_server с загрузкой game_server
 	result = await db.execute(
 		select(MinecraftServerModel)
+		.options(selectinload(MinecraftServerModel.game_server))
 		.where(MinecraftServerModel.game_server_id == server_id)
 	)
 	mc_server = result.scalar_one_or_none()
 	
-	if not mc_server:
+	if not mc_server or not mc_server.game_server:
 		raise HTTPException(
 			status_code=status.HTTP_404_NOT_FOUND,
 			detail="Server not found in statistics"
@@ -227,7 +229,7 @@ async def get_server_stats(
 	return MinecraftServerStats(
 		server_id=mc_server.id,
 		server_uuid=mc_server.server_uuid,
-		name=mc_server.name,
+		name=mc_server.game_server.name,
 		total_players=total_players,
 		total_sessions=total_sessions,
 		average_tps=float(average_tps) if average_tps else None,
