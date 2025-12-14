@@ -351,8 +351,10 @@ async def process_statistics_batch(
 						)
 					)
 					session = result.scalar_one_or_none()
+					is_new_session = False
 					
 					if not session:
+						is_new_session = True
 						session = MinecraftSession(
 							user_id=user_id_map[session_data.uuid],
 							server_id=mc_server.id,
@@ -390,13 +392,14 @@ async def process_statistics_batch(
 							# Не добавляем в errors, т.к. это не критично для обработки статистики
 					
 					# Обновляем прогресс для server_join (при создании новой сессии)
-					if not session:
+					if is_new_session:
 						try:
 							from app.services.badge_progress import get_user_id_from_minecraft_uuid
 							from app.services.quest_progress import update_progress as update_quest_progress
 							user_id = await get_user_id_from_minecraft_uuid(session_data.uuid, db)
 							if user_id:
 								await update_quest_progress("server_join", user_id, 1, db)
+								logger.info(f"Updated server_join quest progress for user {user_id}")
 						except Exception as e:
 							logger.error(f"Error updating quest progress for server_join: {e}")
 				except Exception as e:
