@@ -454,6 +454,7 @@ async def update_game_server(
 		server.port = port
 	
 	# Обновляем статус если передан
+	old_status = server.status
 	if server_status is not None:
 		try:
 			server_status_enum = ServerStatus(server_status)
@@ -515,6 +516,32 @@ async def update_game_server(
 	
 	await db.commit()
 	await db.refresh(server)
+	
+	# Создаем событие активности если статус изменился
+	if server_status is not None and old_status != server.status:
+		try:
+			from app.services.activity import create_activity
+			from app.models.activity import ActivityType
+			status_names = {
+				ServerStatus.active: "работает",
+				ServerStatus.disabled: "выключен",
+				ServerStatus.maintenance: "на обслуживании"
+			}
+			await create_activity(
+				db=db,
+				activity_type=ActivityType.server_status_changed,
+				title=f"Статус сервера {server.name} изменился",
+				description=f"Сервер теперь {status_names.get(server.status, server.status.value)}",
+				server_id=server.id,
+				meta_data={
+					"server_id": str(server.id),
+					"server_name": server.name,
+					"old_status": old_status.value,
+					"new_status": server.status.value
+				}
+			)
+		except Exception as e:
+			logger.error(f"Failed to create server_status_changed activity for server {server.id}: {e}", exc_info=True)
 	
 	# Загружаем связь с типом игры
 	result = await db.execute(

@@ -244,6 +244,27 @@ async def award_xp(
 			)
 		except Exception as e:
 			logger.error(f"Failed to create level_up notification for user {user_id}: {e}", exc_info=True)
+		
+		# Создаем событие активности
+		try:
+			from app.services.activity import create_activity
+			from app.models.activity import ActivityType
+			
+			username = user.username if user.username else "Игрок"
+			await create_activity(
+				db=db,
+				activity_type=ActivityType.level_up,
+				title=f"{username} повысил уровень",
+				description=f"Достиг уровня {new_level}",
+				user_id=user_id,
+				meta_data={
+					"old_level": old_level,
+					"new_level": new_level,
+					"levels_gained": levels_gained
+				}
+			)
+		except Exception as e:
+			logger.error(f"Failed to create level_up activity for user {user_id}: {e}", exc_info=True)
 	
 	progression = get_progression_info(new_xp)
 	

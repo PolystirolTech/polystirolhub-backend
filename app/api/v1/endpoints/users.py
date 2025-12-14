@@ -158,6 +158,68 @@ async def get_leaderboard(
 			# Сохраняем в кэш
 			await set_cache(cache_key, json.dumps(players_data), cache_ttl)
 			
+			# Проверяем изменения в лидерборде
+			if players:
+				first_place_user = players[0]
+				previous_leader_key = "leaderboard:previous_leader"
+				previous_leader_data = await get_cache(previous_leader_key)
+				
+				if previous_leader_data:
+					try:
+						previous_leader = json.loads(previous_leader_data)
+						previous_leader_id = previous_leader.get("id")
+						
+						# Если первый игрок изменился
+						if previous_leader_id != str(first_place_user.id):
+							try:
+								from app.services.activity import create_activity
+								from app.models.activity import ActivityType
+								
+								# Создаем событие о смене первого места
+								await create_activity(
+									db=db,
+									activity_type=ActivityType.leaderboard_first_place,
+									title=f"{first_place_user.username or 'Игрок'} занял первое место в топе",
+									description=f"Уровень {first_place_user.level}, {first_place_user.xp} XP",
+									user_id=first_place_user.id,
+									meta_data={
+										"user_id": str(first_place_user.id),
+										"username": first_place_user.username,
+										"level": first_place_user.level,
+										"xp": first_place_user.xp,
+										"previous_leader_id": previous_leader_id
+									}
+								)
+								
+								# Также создаем событие об изменении в топе
+								await create_activity(
+									db=db,
+									activity_type=ActivityType.leaderboard_changed,
+									title="Изменение в топе игроков",
+									description=f"{first_place_user.username or 'Игрок'} теперь на первом месте",
+									user_id=first_place_user.id,
+									meta_data={
+										"user_id": str(first_place_user.id),
+										"username": first_place_user.username,
+										"level": first_place_user.level,
+										"xp": first_place_user.xp,
+										"previous_leader_id": previous_leader_id
+									}
+								)
+							except Exception as e:
+								logger.error(f"Failed to create leaderboard activity: {e}", exc_info=True)
+					except (json.JSONDecodeError, Exception) as e:
+						logger.warning(f"Failed to parse previous leader data: {e}")
+				
+				# Сохраняем текущего лидера для следующей проверки
+				current_leader_data = {
+					"id": str(first_place_user.id),
+					"username": first_place_user.username,
+					"level": first_place_user.level,
+					"xp": first_place_user.xp
+				}
+				await set_cache(previous_leader_key, json.dumps(current_leader_data), 86400)  # 24 часа
+			
 			# Возвращаем результат
 			return [LeaderboardPlayer(**player) for player in players_data]
 		except Exception as e:

@@ -257,6 +257,32 @@ async def award_badge(
 			)
 		except Exception as e:
 			logger.error(f"Failed to create badge_earned notification for user {user_id}, badge {badge_id}: {e}", exc_info=True)
+		
+		# Создаем событие активности
+		try:
+			from app.services.activity import create_activity
+			from app.models.activity import ActivityType
+			from app.models.user import User
+			
+			# Получаем пользователя для имени
+			user_result = await db.execute(select(User).where(User.id == user_id))
+			user = user_result.scalar_one_or_none()
+			username = user.username if user else "Игрок"
+			
+			await create_activity(
+				db=db,
+				activity_type=ActivityType.badge_earned,
+				title=f"{username} получил бейдж",
+				description=f"Бейдж: {badge.name}",
+				user_id=user_id,
+				meta_data={
+					"badge_id": str(badge.id),
+					"badge_name": badge.name,
+					"badge_type": badge.badge_type.value if badge.badge_type else None
+				}
+			)
+		except Exception as e:
+			logger.error(f"Failed to create badge_earned activity for user {user_id}, badge {badge_id}: {e}", exc_info=True)
 	
 	return user_badge
 

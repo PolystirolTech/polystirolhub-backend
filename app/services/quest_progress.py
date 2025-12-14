@@ -148,6 +148,51 @@ async def update_progress(
 						)
 					except Exception as e:
 						logger.error(f"Failed to create achievement_unlocked notification for user {user_id}, quest {quest.id}: {e}", exc_info=True)
+				
+				# Создаем события активности
+				try:
+					from app.services.activity import create_activity
+					from app.models.activity import ActivityType
+					from app.models.user import User
+					
+					# Получаем пользователя для имени
+					user_result = await db.execute(select(User).where(User.id == user_id))
+					user = user_result.scalar_one_or_none()
+					username = user.username if user else "Игрок"
+					
+					# Создаем событие для achievement квестов
+					if quest.quest_type == QuestType.achievement:
+						await create_activity(
+							db=db,
+							activity_type=ActivityType.achievement_unlocked,
+							title=f"{username} получил достижение",
+							description=f"Достижение: {quest.name}",
+							user_id=user_id,
+							meta_data={
+								"quest_id": str(quest.id),
+								"quest_name": quest.name,
+								"reward_xp": quest.reward_xp,
+								"reward_balance": quest.reward_balance
+							}
+						)
+					
+					# Создаем событие для всех завершенных квестов
+					await create_activity(
+						db=db,
+						activity_type=ActivityType.quest_completed,
+						title=f"{username} завершил квест",
+						description=f"Квест: {quest.name}",
+						user_id=user_id,
+						meta_data={
+							"quest_id": str(quest.id),
+							"quest_name": quest.name,
+							"quest_type": quest.quest_type.value,
+							"reward_xp": quest.reward_xp,
+							"reward_balance": quest.reward_balance
+						}
+					)
+				except Exception as e:
+					logger.error(f"Failed to create activity for quest completion for user {user_id}, quest {quest.id}: {e}", exc_info=True)
 	
 	await db.commit()
 

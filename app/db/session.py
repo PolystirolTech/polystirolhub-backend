@@ -7,6 +7,7 @@ from app.models.user import User, OAuthAccount, ExternalLink  # noqa: F401
 from app.models.game_server import GameType, GameServer  # noqa: F401
 from app.models.badge import Badge, UserBadge, UserBadgeProgress  # noqa: F401
 from app.models.quest import Quest, UserQuest  # noqa: F401
+from app.models.activity import Activity  # noqa: F401
 from app.models.statistics import (  # noqa: F401
 	MinecraftServer, MinecraftUser, MinecraftUserInfo, MinecraftSession,
 	MinecraftNickname, MinecraftKill, MinecraftPing, MinecraftPlatform,
@@ -15,7 +16,7 @@ from app.models.statistics import (  # noqa: F401
 	MinecraftSettings
 )
 
-engine = create_async_engine(settings.SQLALCHEMY_DATABASE_URI, echo=True)
+engine = create_async_engine(settings.SQLALCHEMY_DATABASE_URI, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 async def get_db():

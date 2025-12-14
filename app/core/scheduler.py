@@ -44,6 +44,22 @@ async def initialize_daily_quests_job():
 				except Exception as e:
 					logger.error(f"Error initializing daily quests for user {user.id}: {e}", exc_info=True)
 			
+			# Создаем событие активности
+			try:
+				from app.services.activity import create_activity
+				from app.models.activity import ActivityType
+				await create_activity(
+					db=db,
+					activity_type=ActivityType.daily_quests_refreshed,
+					title="Ежедневные квесты обновлены",
+					description=f"Новые ежедневные квесты доступны для {len(users)} игроков",
+					meta_data={
+						"users_count": len(users)
+					}
+				)
+			except Exception as e:
+				logger.error(f"Failed to create daily_quests_refreshed activity: {e}", exc_info=True)
+			
 			logger.info("Daily quests initialization completed")
 	except Exception as e:
 		logger.error(f"Error in daily quests initialization job: {e}", exc_info=True)

@@ -38,3 +38,4 @@ class GameServer(Base):
 	updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 	game_type = relationship("GameType", back_populates="game_servers")
+	activities = relationship("Activity", back_populates="server", cascade="all, delete-orphan")

@@ -583,6 +583,24 @@ async def callback(
                 db.add(user)
                 await db.commit()
                 await db.refresh(user)
+                
+                # Создаем событие активности для нового пользователя
+                try:
+                    from app.services.activity import create_activity
+                    from app.models.activity import ActivityType
+                    await create_activity(
+                        db=db,
+                        activity_type=ActivityType.new_user,
+                        title="Новый игрок присоединился",
+                        description=f"{final_username} зарегистрировался",
+                        user_id=user.id,
+                        meta_data={
+                            "username": final_username,
+                            "provider": provider
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create new_user activity for user {user.id}: {e}", exc_info=True)
             
             new_oauth = OAuthAccount(
                 user_id=user.id,
