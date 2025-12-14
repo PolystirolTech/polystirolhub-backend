@@ -12,6 +12,7 @@ from app.models.badge import Badge, UserBadge, UserBadgeProgress
 from app.models.user import ExternalLink
 from app.core.progression import award_xp
 from app.core.currency import add_currency
+from app.services.user_counters import get_counter
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,16 @@ async def update_progress(
 		
 		# Обновляем прогресс только если еще не завершено
 		if progress.completed_at is None:
-			progress.progress += increment
+			# Для счетчиков (blocks_traveled, messages_sent и т.д.) читаем значение из UserCounters
+			# Это обеспечивает синхронизацию между счетчиками и прогрессом бейджей
+			counter_value = await get_counter(user_id, condition_key, db)
+			
+			if counter_value > 0:
+				# Используем значение из счетчика как источник истины
+				progress.progress = counter_value
+			else:
+				# Для не-счетчиков увеличиваем на increment
+				progress.progress += increment
 			
 			# Проверяем достижение цели
 			if badge.target_value and progress.progress >= badge.target_value:

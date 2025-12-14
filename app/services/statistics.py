@@ -717,6 +717,7 @@ async def process_statistics_batch(
 					
 					from app.services.user_counters import increment_counter
 					from app.services.quest_progress import update_progress as update_quest_progress
+					from app.services.badge_progress import update_progress as update_badge_progress
 					
 					# Обновляем все счетчики из словаря (гибкая структура - любые ключи)
 					for counter_key, increment_value in counter_data.counters.items():
@@ -725,6 +726,8 @@ async def process_statistics_batch(
 							await increment_counter(user_id, counter_key, increment_value, db)
 							# Обновляем прогресс квестов (если есть квесты с таким condition_key)
 							await update_quest_progress(counter_key, user_id, increment_value, db)
+							# Обновляем прогресс бейджей (если есть бейджи с таким condition_key)
+							await update_badge_progress(counter_key, user_id, increment_value, db)
 					
 					processed["counters"] = processed.get("counters", 0) + 1
 				except Exception as e:
