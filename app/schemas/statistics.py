@@ -204,6 +204,8 @@ class MinecraftSessionResponse(BaseModel):
 	id: int
 	server_id: int
 	session_start: int
+	session_date: str  # дата начала сессии в формате YYYY-MM-DD
+	session_date_end: str  # дата конца сессии в формате YYYY-MM-DD
 	session_end: Optional[int]
 	mob_kills: Optional[int]
 	deaths: Optional[int]

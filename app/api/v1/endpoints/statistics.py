@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 from typing import List
 from uuid import UUID
+from datetime import datetime, timezone
 
 from app.api import deps
 from app.models.statistics import (
@@ -276,7 +277,8 @@ async def get_player_sessions(
 			id=session.id,
 			server_id=session.server_id,
 			session_start=session.session_start,
-			session_end=session.session_end,
+			session_date=datetime.fromtimestamp(session.session_start / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
+			session_date_end=datetime.fromtimestamp(session.session_end / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
 			mob_kills=session.mob_kills,
 			deaths=session.deaths,
 			afk_time=session.afk_time,
