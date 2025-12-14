@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 
 # ========== Batch запросы от игровых серверов ==========
@@ -136,6 +136,18 @@ class MinecraftGeolocationData(BaseModel):
 	last_used: int = Field(default=0, description="Timestamp в миллисекундах")
 
 
+class MinecraftPlayerCountersData(BaseModel):
+	"""Счетчики игрока за период (агрегированные значения - инкременты)
+	
+	Гибкая структура: в моде можно добавлять любые ключи счетчиков.
+	Примеры ключей: blocks_traveled, messages_sent, blocks_broken, items_crafted и т.д.
+	"""
+	uuid: str = Field(..., max_length=36)
+	server_uuid: str = Field(..., max_length=36)
+	counters: Dict[str, int] = Field(default_factory=dict, description="Словарь счетчиков: ключ -> значение (инкремент)")
+	# Пример: {"blocks_traveled": 1000, "messages_sent": 50, "blocks_broken": 200}
+
+
 class MinecraftStatisticsBatch(BaseModel):
 	"""Batch запрос статистики от игрового сервера"""
 	server_uuid: str = Field(..., max_length=36, description="UUID сервера для идентификации")
@@ -155,6 +167,7 @@ class MinecraftStatisticsBatch(BaseModel):
 	world_times: Optional[List[MinecraftWorldTimeData]] = None
 	version_protocols: Optional[List[MinecraftVersionProtocolData]] = None
 	geolocations: Optional[List[MinecraftGeolocationData]] = None
+	counters: Optional[List[MinecraftPlayerCountersData]] = None
 
 	@field_validator('server_uuid')
 	@classmethod

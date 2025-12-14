@@ -9,6 +9,7 @@ import logging
 
 from app.models.user import User
 from app.services.badge_progress import extend_or_award_badge
+from app.services.user_counters import get_counter
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ class PlaytimeLeaderSeasonHandler(BaseConditionHandler):
 
 
 class MessagesSentHandler(BaseConditionHandler):
-	"""Заглушка для количества сообщений в чате."""
+	"""Обработчик для количества сообщений в чате."""
 	
 	async def calculate_progress(
 		self,
@@ -158,7 +159,7 @@ class MessagesSentHandler(BaseConditionHandler):
 		db: AsyncSession
 	) -> int:
 		"""
-		Заглушка - статистика сообщений пока не считается.
+		Вычисляет количество отправленных сообщений из UserCounters.
 		
 		Args:
 			user_id: UUID пользователя
@@ -166,10 +167,9 @@ class MessagesSentHandler(BaseConditionHandler):
 			db: Асинхронная сессия базы данных
 			
 		Returns:
-			0 (не реализовано)
+			Количество отправленных сообщений
 		"""
-		logger.warning("MessagesSentHandler is not implemented yet - message statistics not tracked")
-		return 0
+		return await get_counter(user_id, "messages_sent", db)
 
 
 # Реестр обработчиков условий

@@ -216,7 +216,8 @@ async def process_statistics_batch(
 		"worlds": 0,
 		"world_times": 0,
 		"version_protocols": 0,
-		"geolocations": 0
+		"geolocations": 0,
+		"counters": 0
 	}
 	
 	try:
@@ -703,6 +704,32 @@ async def process_statistics_batch(
 						logger.error(f"Error updating quest progress for playtime_daily for user {user_id}: {e}")
 			except Exception as e:
 				logger.error(f"Error updating playtime_daily quest progress: {e}")
+		
+		# Обрабатываем счетчики (отдельный массив в batch)
+		if batch.counters:
+			for counter_data in batch.counters:
+				try:
+					# Получаем User ID через ExternalLink (Minecraft UUID -> User ID)
+					user_id = await link_player_to_user(db, counter_data.uuid)
+					if not user_id:
+						# Игрок не привязан к аккаунту - пропускаем
+						continue
+					
+					from app.services.user_counters import increment_counter
+					from app.services.quest_progress import update_progress as update_quest_progress
+					
+					# Обновляем все счетчики из словаря (гибкая структура - любые ключи)
+					for counter_key, increment_value in counter_data.counters.items():
+						if increment_value and increment_value > 0:
+							# Обновляем счетчик в БД
+							await increment_counter(user_id, counter_key, increment_value, db)
+							# Обновляем прогресс квестов (если есть квесты с таким condition_key)
+							await update_quest_progress(counter_key, user_id, increment_value, db)
+					
+					processed["counters"] = processed.get("counters", 0) + 1
+				except Exception as e:
+					errors.append(f"Error processing counters for {counter_data.uuid}: {e}")
+					logger.error(f"Error processing counters for {counter_data.uuid}: {e}")
 		
 		# Коммитим все изменения
 		await db.commit()

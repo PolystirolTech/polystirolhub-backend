@@ -14,6 +14,7 @@ from app.models.user import OAuthAccount, ExternalLink
 from app.models.statistics import MinecraftSession, MinecraftUser
 from app.core.progression import award_xp
 from app.core.currency import add_currency
+from app.services.user_counters import get_counter
 
 logger = logging.getLogger(__name__)
 
@@ -100,11 +101,18 @@ async def update_progress(
 		
 		# Обновляем прогресс только если еще не завершено
 		if user_quest.completed_at is None:
-			if absolute_value is not None:
+			# Для счетчиков (blocks_traveled, messages_sent и т.д.) читаем значение из UserCounters
+			# Это обеспечивает синхронизацию между счетчиками и прогрессом квестов
+			counter_value = await get_counter(user_id, condition_key, db)
+			
+			if counter_value > 0:
+				# Используем значение из счетчика как источник истины
+				user_quest.progress = counter_value
+			elif absolute_value is not None:
 				# Устанавливаем абсолютное значение (но не меньше текущего)
 				user_quest.progress = max(user_quest.progress, absolute_value)
 			else:
-				# Увеличиваем на increment
+				# Увеличиваем на increment (для не-счетчиков)
 				user_quest.progress += increment
 			
 			# Проверяем достижение цели

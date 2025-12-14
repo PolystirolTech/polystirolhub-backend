@@ -3,7 +3,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 
 # Импортируем все модели для регистрации в Base.metadata
-from app.models.user import User, OAuthAccount, ExternalLink  # noqa: F401
+from app.models.user import User, OAuthAccount, ExternalLink, UserCounter  # noqa: F401
 from app.models.game_server import GameType, GameServer  # noqa: F401
 from app.models.badge import Badge, UserBadge, UserBadgeProgress  # noqa: F401
 from app.models.quest import Quest, UserQuest  # noqa: F401
