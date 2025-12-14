@@ -7,11 +7,14 @@
 - C(L) = ⌈L/10⌉ × 100 - валюта, начисляемая при достижении уровня L
 """
 import math
+import logging
 from typing import Dict
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_e_for_level(level: int) -> int:
@@ -220,6 +223,27 @@ async def award_xp(
 	
 	await db.commit()
 	await db.refresh(user)
+	
+	# Создаем уведомление о повышении уровня
+	if level_increased:
+		try:
+			from app.services.notifications import create_notification
+			await create_notification(
+				db=db,
+				user_id=user_id,
+				notification_type="level_up",
+				title="Новый уровень!",
+				message=f"Вы достигли уровня {new_level}!",
+				reward_xp=0,  # XP уже начислен
+				reward_balance=currency_awarded,
+				meta_data={
+					"old_level": old_level,
+					"new_level": new_level,
+					"levels_gained": levels_gained
+				}
+			)
+		except Exception as e:
+			logger.error(f"Failed to create level_up notification for user {user_id}: {e}", exc_info=True)
 	
 	progression = get_progression_info(new_xp)
 	

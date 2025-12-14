@@ -238,6 +238,26 @@ async def award_badge(
 	await db.commit()
 	await db.refresh(user_badge)
 	
+	# Создаем уведомление при первом получении баджа
+	if is_first_time:
+		try:
+			from app.services.notifications import create_notification
+			await create_notification(
+				db=db,
+				user_id=user_id,
+				notification_type="badge_earned",
+				title="Новый бадж!",
+				message=badge.name,
+				reward_xp=badge.reward_xp,
+				reward_balance=badge.reward_balance,
+				meta_data={
+					"badge_id": str(badge.id),
+					"badge_name": badge.name
+				}
+			)
+		except Exception as e:
+			logger.error(f"Failed to create badge_earned notification for user {user_id}, badge {badge_id}: {e}", exc_info=True)
+	
 	return user_badge
 
 

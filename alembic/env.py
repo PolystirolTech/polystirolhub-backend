@@ -14,6 +14,7 @@ from app.models.user import User, OAuthAccount, ExternalLink  # noqa: E402, F401
 from app.models.game_server import GameType, GameServer  # noqa: E402, F401
 from app.models.badge import Badge, UserBadge, UserBadgeProgress  # noqa: E402, F401
 from app.models.quest import Quest, UserQuest  # noqa: E402, F401
+from app.models.notification import Notification  # noqa: E402, F401
 from app.models.statistics import (  # noqa: E402, F401
 	MinecraftServer, MinecraftUser, MinecraftUserInfo, MinecraftSession,
 	MinecraftNickname, MinecraftKill, MinecraftPing, MinecraftPlatform,

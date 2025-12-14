@@ -25,6 +25,7 @@ class User(Base):
 	user_badges = relationship("UserBadge", back_populates="user", cascade="all, delete-orphan")
 	user_quests = relationship("UserQuest", back_populates="user", cascade="all, delete-orphan")
 	user_badge_progress = relationship("UserBadgeProgress", back_populates="user", cascade="all, delete-orphan")
+	notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
 	selected_badge_id = Column(UUID(as_uuid=True), ForeignKey("badges.id"), nullable=True)
 
 class OAuthAccount(Base):

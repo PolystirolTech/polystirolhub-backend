@@ -128,6 +128,26 @@ async def update_progress(
 						logger.info(f"Awarded {quest.reward_balance} currency for quest {quest.id} (user {user_id})")
 					except Exception as e:
 						logger.error(f"Failed to award currency for quest {quest.id}: {e}", exc_info=True)
+				
+				# Создаем уведомление для achievement квестов
+				if quest.quest_type == QuestType.achievement:
+					try:
+						from app.services.notifications import create_notification
+						await create_notification(
+							db=db,
+							user_id=user_id,
+							notification_type="achievement_unlocked",
+							title="Достижение разблокировано!",
+							message=quest.name,
+							reward_xp=quest.reward_xp,
+							reward_balance=quest.reward_balance,
+							meta_data={
+								"quest_id": str(quest.id),
+								"quest_name": quest.name
+							}
+						)
+					except Exception as e:
+						logger.error(f"Failed to create achievement_unlocked notification for user {user_id}, quest {quest.id}: {e}", exc_info=True)
 	
 	await db.commit()
 
