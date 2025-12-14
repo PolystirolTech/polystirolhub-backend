@@ -29,11 +29,15 @@ router = APIRouter()
 
 @router.get("/badges", response_model=list[Badge])
 async def get_badges(
+	skip: int = Query(0, ge=0, description="Количество пропущенных записей"),
+	limit: int = Query(50, ge=1, le=100, description="Максимальное количество записей"),
 	db: AsyncSession = Depends(deps.get_db)
 ):
 	"""Публичный список всех доступных бэджиков"""
 	result = await db.execute(
 		select(BadgeModel).order_by(BadgeModel.created_at.desc())
+		.offset(skip)
+		.limit(limit)
 	)
 	badges = result.scalars().all()
 	return badges
@@ -43,6 +47,8 @@ async def get_badges(
 
 @router.get("/badges/me", response_model=list[UserBadgeWithBadge])
 async def get_my_badges(
+	skip: int = Query(0, ge=0, description="Количество пропущенных записей"),
+	limit: int = Query(50, ge=1, le=100, description="Максимальное количество записей"),
 	current_user: User = Depends(deps.get_current_user),
 	db: AsyncSession = Depends(deps.get_db)
 ):
@@ -64,6 +70,8 @@ async def get_my_badges(
 				)
 			)
 			.order_by(UserBadge.received_at.desc())
+			.offset(skip)
+			.limit(limit)
 		)
 		user_badges = result.scalars().all()
 		
@@ -413,12 +421,16 @@ async def create_badge(
 
 @router.get("/admin/badges", response_model=list[Badge])
 async def list_badges(
+	skip: int = Query(0, ge=0, description="Количество пропущенных записей"),
+	limit: int = Query(50, ge=1, le=100, description="Максимальное количество записей"),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
 ):
 	"""Список всех бэджиков (только для админов)"""
 	result = await db.execute(
 		select(BadgeModel).order_by(BadgeModel.created_at.desc())
+		.offset(skip)
+		.limit(limit)
 	)
 	badges = result.scalars().all()
 	return badges

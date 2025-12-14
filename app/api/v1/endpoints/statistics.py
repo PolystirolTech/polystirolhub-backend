@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 from typing import List
@@ -293,7 +293,8 @@ async def get_player_sessions(
 @router.get("/minecraft/servers/{server_id}/players", response_model=List[MinecraftTopPlayer])
 async def get_server_top_players(
 	server_id: UUID,
-	limit: int = 50,
+	offset: int = Query(0, ge=0, description="Количество пропущенных записей"),
+	limit: int = Query(50, ge=1, le=100, description="Максимальное количество записей"),
 	db: AsyncSession = Depends(deps.get_db)
 ):
 	"""Получает топ игроков сервера"""
@@ -333,6 +334,7 @@ async def get_server_top_players(
 			func.coalesce(MinecraftSession.session_end, func.extract('epoch', func.now()) * 1000) -
 			MinecraftSession.session_start - func.coalesce(MinecraftSession.afk_time, 0)
 		).desc())
+		.offset(offset)
 		.limit(limit)
 	)
 	

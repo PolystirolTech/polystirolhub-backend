@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -187,6 +187,8 @@ async def demote_from_admin(
 
 @router.get("/list", response_model=list[AdminResponse])
 async def list_admins(
+	skip: int = Query(0, ge=0, description="Количество пропущенных записей"),
+	limit: int = Query(50, ge=1, le=100, description="Максимальное количество записей"),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
 ):
@@ -196,6 +198,8 @@ async def list_admins(
 		select(User).where(
 			(User.is_admin) | (User.is_super_admin)
 		).order_by(User.created_at)
+		.offset(skip)
+		.limit(limit)
 	)
 	admins = result.scalars().all()
 	
@@ -214,12 +218,16 @@ async def list_admins(
 
 @router.get("/users", response_model=list[UserResponse])
 async def get_all_users(
+	skip: int = Query(0, ge=0, description="Количество пропущенных записей"),
+	limit: int = Query(50, ge=1, le=100, description="Максимальное количество записей"),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
 ):
 	"""Получить список всех пользователей. Доступно только для админов."""
 	result = await db.execute(
 		select(User).order_by(User.created_at)
+		.offset(skip)
+		.limit(limit)
 	)
 	users = result.scalars().all()
 	
