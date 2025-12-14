@@ -1,9 +1,15 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
+import enum
 from app.db.base_class import Base
+
+class ServerStatus(enum.Enum):
+	active = "active"  # Работает
+	disabled = "disabled"  # Выключен
+	maintenance = "maintenance"  # Обслуживание
 
 class GameType(Base):
 	__tablename__ = "game_types"
@@ -27,6 +33,7 @@ class GameServer(Base):
 	port = Column(Integer, nullable=True)
 	resource_pack_url = Column(String, nullable=True)  # Публичный URL ресурс-пака с баджами
 	resource_pack_hash = Column(String, nullable=True)  # SHA1 хэш ресурс-пака
+	status = Column(SQLEnum(ServerStatus, name="server_status"), nullable=False, default=ServerStatus.active, index=True)
 	created_at = Column(DateTime(timezone=True), server_default=func.now())
 	updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

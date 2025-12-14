@@ -6,6 +6,7 @@ import logging
 from mcstatus import JavaServer
 from mcstatus.responses import JavaStatusResponse
 from app.db.redis import get_cache, set_cache, acquire_lock, release_lock
+from app.models.game_server import ServerStatus
 
 logger = logging.getLogger(__name__)
 
@@ -14,17 +15,50 @@ CACHE_TTL = 60  # 1 минута
 LOCK_TIMEOUT = 10  # 10 секунд
 DEFAULT_MINECRAFT_PORT = 25565
 
-async def get_server_status(server_id: UUID, ip: str, port: Optional[int] = None) -> dict:
+async def get_server_status(server_id: UUID, ip: str, port: Optional[int] = None, server_status: ServerStatus = ServerStatus.active) -> dict:
 	"""
 	Получение статуса сервера с кэшированием в Redis.
 	
 	Логика:
-	1. Проверка кэша в Redis
+	- Если server_status == maintenance - возвращает статус обслуживания без запроса к mcstatus
+	- Если server_status == active - выполняет обычный запрос к mcstatus (может перебивать)
+	- Если server_status == disabled - не должно вызываться из публичных эндпоинтов
+	
+	1. Проверка кэша в Redis (только для active)
 	2. Если кэш есть - возврат из кэша
 	3. Если кэша нет - попытка получить блокировку
 	4. Если блокировка получена - запрос к серверу, сохранение в кэш
 	5. Если блокировка не получена - ожидание и повторная проверка кэша
 	"""
+	# Если статус обслуживание - возвращаем сразу без запроса к серверу
+	if server_status == ServerStatus.maintenance:
+		return {
+			"server_icon": None,
+			"motd": None,
+			"players_online": 0,
+			"players_max": 0,
+			"players_list": None,
+			"ping": None,
+			"version": None,
+			"online": False,
+			"error": "Server is under maintenance"
+		}
+	
+	# Если статус выключен - возвращаем ошибку (не должно вызываться из публичных эндпоинтов)
+	if server_status == ServerStatus.disabled:
+		return {
+			"server_icon": None,
+			"motd": None,
+			"players_online": 0,
+			"players_max": 0,
+			"players_list": None,
+			"ping": None,
+			"version": None,
+			"online": False,
+			"error": "Server is disabled"
+		}
+	
+	# Для active статуса - обычная логика с кэшированием
 	cache_key = f"server_status:{server_id}"
 	lock_key = f"server_status:lock:{server_id}"
 	

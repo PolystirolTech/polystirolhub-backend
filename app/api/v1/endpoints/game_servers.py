@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 from typing import Optional
 from app.api import deps
 from app.models.user import User
-from app.models.game_server import GameType, GameServer
+from app.models.game_server import GameType, GameServer, ServerStatus
 from app.schemas.game_server import (
 	GameTypeCreate,
 	GameTypeUpdate,
@@ -75,6 +75,7 @@ async def get_game_servers(
 	result = await db.execute(
 		select(GameServer)
 		.options(selectinload(GameServer.game_type))
+		.where(GameServer.status != ServerStatus.disabled)
 		.order_by(GameServer.created_at.desc())
 	)
 	servers = result.scalars().all()
@@ -94,6 +95,13 @@ async def get_game_server(
 	server = result.scalars().first()
 	
 	if not server:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail="Game server not found"
+		)
+	
+	# Не отображаем серверы со статусом disabled
+	if server.status == ServerStatus.disabled:
 		raise HTTPException(
 			status_code=status.HTTP_404_NOT_FOUND,
 			detail="Game server not found"
@@ -119,8 +127,15 @@ async def get_game_server_status(
 			detail="Game server not found"
 		)
 	
-	# Получаем статус через сервис (с кэшированием)
-	status_data = await get_server_status(server.id, server.ip, server.port)
+	# Не отображаем статус для серверов со статусом disabled
+	if server.status == ServerStatus.disabled:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail="Game server not found"
+		)
+	
+	# Получаем статус через сервис (с кэшированием), передаем статус сервера
+	status_data = await get_server_status(server.id, server.ip, server.port, server.status)
 	
 	return ServerStatusResponse(**status_data)
 
@@ -236,6 +251,7 @@ async def create_game_server(
 	mods: str = Form("[]"),  # JSON строка массива
 	ip: str = Form(...),
 	port: Optional[int] = Form(None),
+	server_status: Optional[str] = Form(None),
 	banner: UploadFile = File(None),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
@@ -296,6 +312,17 @@ async def create_game_server(
 		storage = get_banners_storage()
 		banner_url = await storage.save(file_content, file_name)
 	
+	# Парсим статус если передан
+	server_status_enum = ServerStatus.active
+	if server_status is not None:
+		try:
+			server_status_enum = ServerStatus(server_status)
+		except ValueError:
+			raise HTTPException(
+				status_code=status.HTTP_400_BAD_REQUEST,
+				detail=f"Invalid server_status. Must be one of: {', '.join([s.value for s in ServerStatus])}"
+			)
+	
 	# Создаем сервер
 	new_server = GameServer(
 		name=name,
@@ -304,7 +331,8 @@ async def create_game_server(
 		mods=mods_list,
 		ip=ip,
 		port=port,
-		banner_url=banner_url
+		banner_url=banner_url,
+		status=server_status_enum
 	)
 	
 	db.add(new_server)
@@ -366,6 +394,7 @@ async def update_game_server(
 	mods: str = Form(None),
 	ip: str = Form(None),
 	port: Optional[int] = Form(None),
+	server_status: Optional[str] = Form(None),
 	banner: UploadFile = File(None),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
@@ -423,6 +452,17 @@ async def update_game_server(
 	
 	if port is not None:
 		server.port = port
+	
+	# Обновляем статус если передан
+	if server_status is not None:
+		try:
+			server_status_enum = ServerStatus(server_status)
+			server.status = server_status_enum
+		except ValueError:
+			raise HTTPException(
+				status_code=status.HTTP_400_BAD_REQUEST,
+				detail=f"Invalid server_status. Must be one of: {', '.join([s.value for s in ServerStatus])}"
+			)
 	
 	# Обрабатываем новый баннер если загружен
 	if banner:
