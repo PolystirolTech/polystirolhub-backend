@@ -689,12 +689,6 @@ async def award_badge(
 	)
 	existing = existing_result.scalars().first()
 	
-	if existing:
-		raise HTTPException(
-			status_code=status.HTTP_400_BAD_REQUEST,
-			detail="User already has this badge"
-		)
-	
 	# Для временных бэджиков проверяем наличие expires_at
 	expires_at = request.expires_at
 	if badge.badge_type == BadgeType.temporary and not expires_at:
@@ -703,7 +697,32 @@ async def award_badge(
 			detail="expires_at is required for temporary badges"
 		)
 	
-	# Создаем связь
+	now = datetime.now(timezone.utc)
+	
+	# Если бадж уже существует
+	if existing:
+		# Проверяем, истек ли бадж
+		if existing.expires_at and existing.expires_at <= now:
+			# Бадж истек - удаляем и создаем новый
+			await db.execute(delete(UserBadge).where(UserBadge.id == existing.id))
+			await db.flush()
+		else:
+			# Бадж не истек - обновляем
+			existing.received_at = now
+			if badge.badge_type == BadgeType.temporary and expires_at:
+				existing.expires_at = expires_at
+			await db.commit()
+			await db.refresh(existing)
+			# Загружаем с информацией о бэйдже и возвращаем
+			result = await db.execute(
+				select(UserBadge)
+				.options(selectinload(UserBadge.badge))
+				.where(UserBadge.id == existing.id)
+			)
+			user_badge = result.scalars().first()
+			return UserBadgeWithBadge.model_validate(user_badge)
+	
+	# Создаем новую связь (если баджа не было или он был истекшим)
 	new_user_badge = UserBadge(
 		user_id=user_id,
 		badge_id=badge_id,
