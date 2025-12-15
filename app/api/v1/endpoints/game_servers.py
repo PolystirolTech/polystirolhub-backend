@@ -18,6 +18,7 @@ from app.services.server_status import get_server_status
 from app.core.storage import get_banners_storage
 from app.core.config import settings
 from uuid import UUID
+from datetime import date
 import logging
 import uuid
 import json
@@ -55,6 +56,18 @@ def parse_and_validate_mods(mods_json: str) -> list[str]:
 		raise ValueError(f"mods must be a valid JSON array: {e}")
 	except ValueError as e:
 		raise e
+
+def parse_date(date_str: Optional[str]) -> Optional[date]:
+	"""
+	Парсит строку даты в формате YYYY-MM-DD в объект date.
+	Возвращает None если строка пустая или None.
+	"""
+	if not date_str:
+		return None
+	try:
+		return date.fromisoformat(date_str)
+	except ValueError:
+		raise ValueError(f"Invalid date format. Expected YYYY-MM-DD, got: {date_str}")
 
 # ========== Публичные эндпоинты ==========
 
@@ -252,6 +265,8 @@ async def create_game_server(
 	ip: str = Form(...),
 	port: Optional[int] = Form(None),
 	server_status: Optional[str] = Form(None),
+	season_start: Optional[str] = Form(None),
+	season_end: Optional[str] = Form(None),
 	banner: UploadFile = File(None),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
@@ -323,6 +338,26 @@ async def create_game_server(
 				detail=f"Invalid server_status. Must be one of: {', '.join([s.value for s in ServerStatus])}"
 			)
 	
+	# Парсим даты сезона если переданы
+	parsed_season_start = None
+	parsed_season_end = None
+	if season_start is not None:
+		try:
+			parsed_season_start = parse_date(season_start)
+		except ValueError as e:
+			raise HTTPException(
+				status_code=status.HTTP_400_BAD_REQUEST,
+				detail=str(e)
+			)
+	if season_end is not None:
+		try:
+			parsed_season_end = parse_date(season_end)
+		except ValueError as e:
+			raise HTTPException(
+				status_code=status.HTTP_400_BAD_REQUEST,
+				detail=str(e)
+			)
+	
 	# Создаем сервер
 	new_server = GameServer(
 		name=name,
@@ -332,7 +367,9 @@ async def create_game_server(
 		ip=ip,
 		port=port,
 		banner_url=banner_url,
-		status=server_status_enum
+		status=server_status_enum,
+		season_start=parsed_season_start,
+		season_end=parsed_season_end
 	)
 	
 	db.add(new_server)
@@ -395,6 +432,8 @@ async def update_game_server(
 	ip: str = Form(None),
 	port: Optional[int] = Form(None),
 	server_status: Optional[str] = Form(None),
+	season_start: Optional[str] = Form(None),
+	season_end: Optional[str] = Form(None),
 	banner: UploadFile = File(None),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
@@ -463,6 +502,24 @@ async def update_game_server(
 			raise HTTPException(
 				status_code=status.HTTP_400_BAD_REQUEST,
 				detail=f"Invalid server_status. Must be one of: {', '.join([s.value for s in ServerStatus])}"
+			)
+	
+	# Обновляем даты сезона если переданы
+	if season_start is not None:
+		try:
+			server.season_start = parse_date(season_start)
+		except ValueError as e:
+			raise HTTPException(
+				status_code=status.HTTP_400_BAD_REQUEST,
+				detail=str(e)
+			)
+	if season_end is not None:
+		try:
+			server.season_end = parse_date(season_end)
+		except ValueError as e:
+			raise HTTPException(
+				status_code=status.HTTP_400_BAD_REQUEST,
+				detail=str(e)
 			)
 	
 	# Обрабатываем новый баннер если загружен

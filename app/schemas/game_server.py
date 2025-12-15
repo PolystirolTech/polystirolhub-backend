@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional
 from uuid import UUID
-from datetime import datetime
+from datetime import date, datetime
 from app.models.game_server import ServerStatus
 
 # GameType схемы
@@ -33,6 +33,8 @@ class GameServerBase(BaseModel):
 	resource_pack_url: Optional[str] = None
 	resource_pack_hash: Optional[str] = None
 	status: ServerStatus = ServerStatus.active
+	season_start: Optional[date] = None
+	season_end: Optional[date] = None
 
 class GameServerCreate(GameServerBase):
 	pass
@@ -48,6 +50,8 @@ class GameServerUpdate(BaseModel):
 	resource_pack_url: Optional[str] = None
 	resource_pack_hash: Optional[str] = None
 	status: Optional[ServerStatus] = None
+	season_start: Optional[date] = None
+	season_end: Optional[date] = None
 
 class GameServerResponse(GameServerBase):
 	id: UUID
@@ -72,6 +76,8 @@ class GameServerPublic(BaseModel):
 	resource_pack_url: Optional[str] = None
 	resource_pack_hash: Optional[str] = None
 	status: ServerStatus
+	season_start: Optional[date] = None
+	season_end: Optional[date] = None
 	created_at: datetime
 	updated_at: datetime
 

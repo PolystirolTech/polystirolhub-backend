@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Enum as SQLEnum
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -34,6 +34,8 @@ class GameServer(Base):
 	resource_pack_url = Column(String, nullable=True)  # Публичный URL ресурс-пака с баджами
 	resource_pack_hash = Column(String, nullable=True)  # SHA1 хэш ресурс-пака
 	status = Column(SQLEnum(ServerStatus, name="server_status"), nullable=False, default=ServerStatus.active, index=True)
+	season_start = Column(Date, nullable=True)  # Дата начала сезона
+	season_end = Column(Date, nullable=True)  # Дата конца сезона
 	created_at = Column(DateTime(timezone=True), server_default=func.now())
 	updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
