@@ -21,19 +21,46 @@ class Settings(BaseSettings):
 	REDIS_PORT: int = 6379
 
 	# Auth
-	SECRET_KEY: str = "CHANGE_THIS_SECRET_KEY"
+	SECRET_KEY: str = "CHANGE_THIS_SECRET_KEY_FROM_ENV_FILE"
 	ALGORITHM: str = "HS256"
 	ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+	REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+	REFRESH_TOKEN_REDIS_PREFIX: str = "refresh_token:"
 
 	# OAuth Providers
 	TWITCH_CLIENT_ID: str = ""
 	TWITCH_CLIENT_SECRET: str = ""
 	DISCORD_CLIENT_ID: str = ""
 	DISCORD_CLIENT_SECRET: str = ""
+	STEAM_CLIENT_ID: str = ""  # Опционально, для совместимости
 	STEAM_API_KEY: str = ""
 
 	# Frontend
 	FRONTEND_URL: str = "http://localhost:3000"
+	
+	# Backend
+	BACKEND_BASE_URL: str = "http://localhost:8000"  # Базовый URL бэкенда для формирования полных URL
+
+	# Storage
+	STORAGE_BACKEND: str = "local"  # "local" or "s3"
+	STORAGE_LOCAL_PATH: str = "uploads/avatars"  # Путь для локального хранения
+	STORAGE_AVATARS_BASE_URL: str = "/static/avatars"  # Базовый URL для доступа к аватарам (относительный путь)
+	# Banners storage
+	STORAGE_BANNERS_LOCAL_PATH: str = "uploads/banners"  # Путь для локального хранения баннеров
+	STORAGE_BANNERS_BASE_URL: str = "/static/banners"  # Базовый URL для доступа к баннерам
+	# Badges storage
+	STORAGE_BADGES_LOCAL_PATH: str = "uploads/badges"  # Путь для локального хранения бэджиков
+	STORAGE_BADGES_BASE_URL: str = "/static/badges"  # Базовый URL для доступа к бэджикам
+	# Resource packs storage
+	STORAGE_RESOURCE_PACKS_LOCAL_PATH: str = "uploads/resource_packs"  # Путь для локального хранения ресурс-паков
+	STORAGE_RESOURCE_PACKS_BASE_URL: str = "/static/resource_packs"  # Базовый URL для доступа к ресурс-пакам
+	# S3 настройки (для будущего использования)
+	STORAGE_S3_BUCKET: str = ""
+	STORAGE_S3_REGION: str = "us-east-1"
+	STORAGE_S3_BASE_URL: str = ""  # Опционально, кастомный URL
+
+	# Debug
+	DEBUG: bool = True  # По умолчанию True для разработки
 
 	class Config:
 		case_sensitive = True

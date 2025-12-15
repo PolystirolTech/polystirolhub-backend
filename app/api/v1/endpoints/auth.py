@@ -1,18 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Request, status, UploadFile, File
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete, and_
 from app.api import deps
 from app.core.config import settings
-from app.core.security import create_access_token
-from app.models.user import User, OAuthAccount
-from app.schemas.user import UserUpdate
+from app.core.security import create_access_token, create_refresh_token
+from app.core.storage import get_storage
+from app.models.user import User, OAuthAccount, ExternalLink
+from app.schemas.user import UserUpdate, OAuthAccountPublic
+from app.schemas.link import LinkCodeGenerateResponse, LinkRequest, LinkResponse, LinkStatusResponse, ExternalLinkResponse
+from app.db.redis import save_refresh_token, get_refresh_token, delete_refresh_token, save_link_code, get_link_code, delete_link_code, acquire_lock, release_lock
 import httpx
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from itsdangerous import URLSafeTimedSerializer
 import secrets
 import logging
+import uuid
+from uuid import UUID
+from typing import Optional, Tuple, List
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +43,19 @@ PROVIDERS = {
         "client_id": settings.DISCORD_CLIENT_ID,
         "client_secret": settings.DISCORD_CLIENT_SECRET,
         "scope": "identify email",
+    },
+    "steam": {
+        "auth_url": "https://steamcommunity.com/openid/login",
+        "api_key": settings.STEAM_API_KEY,
+        "api_url": "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/",
+        "openid_verify_url": "https://steamcommunity.com/openid/login",
     }
 }
+
+# Check Steam API key on startup
+if not settings.STEAM_API_KEY:
+    logger.warning("STEAM_API_KEY is not configured - Steam authentication will fail")
+
 
 def create_state_token(action: str, user_id: str = None) -> str:
     """Create secure state token with CSRF protection"""
@@ -56,6 +73,85 @@ def verify_state_token(state: str, max_age: int = 600) -> dict:
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid or expired state token")
 
+async def refresh_oauth_token_if_needed(
+    user: User,
+    db: AsyncSession
+) -> Tuple[Optional[datetime], bool]:
+    """
+    Refresh OAuth tokens if they expired.
+    Returns: (max_expires_at, success)
+    """
+    result = await db.execute(
+        select(OAuthAccount).where(OAuthAccount.user_id == user.id)
+    )
+    oauth_accounts = result.scalars().all()
+    
+    if not oauth_accounts:
+        return None, False
+    
+    max_expires_at = None
+    all_refreshed = True
+    now = datetime.now(timezone.utc)
+    
+    for oauth_account in oauth_accounts:
+        # Skip Steam - it doesn't use refresh tokens
+        if oauth_account.provider == "steam":
+            continue
+        
+        # Skip if token doesn't expire or is still valid
+        if not oauth_account.expires_at or oauth_account.expires_at > now:
+            if oauth_account.expires_at:
+                if max_expires_at is None or oauth_account.expires_at > max_expires_at:
+                    max_expires_at = oauth_account.expires_at
+            continue
+        
+        # Skip if no refresh token
+        if not oauth_account.refresh_token:
+            all_refreshed = False
+            continue
+        
+        # Try to refresh token
+        if oauth_account.provider not in PROVIDERS:
+            all_refreshed = False
+            continue
+        
+        config = PROVIDERS[oauth_account.provider]
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                data = {
+                    "client_id": config["client_id"],
+                    "client_secret": config["client_secret"],
+                    "grant_type": "refresh_token",
+                    "refresh_token": oauth_account.refresh_token,
+                }
+                
+                response = await client.post(config["token_url"], data=data)
+                
+                if response.status_code == 200:
+                    token_data = response.json()
+                    oauth_account.access_token = token_data["access_token"]
+                    oauth_account.refresh_token = token_data.get("refresh_token") or oauth_account.refresh_token
+                    
+                    expires_in = token_data.get("expires_in")
+                    if expires_in:
+                        oauth_account.expires_at = now + timedelta(seconds=int(expires_in))
+                        if max_expires_at is None or oauth_account.expires_at > max_expires_at:
+                            max_expires_at = oauth_account.expires_at
+                    else:
+                        oauth_account.expires_at = None
+                    
+                    await db.commit()
+                    logger.info(f"Refreshed OAuth token for user {user.id}, provider {oauth_account.provider}")
+                else:
+                    logger.warning(f"Failed to refresh OAuth token for user {user.id}, provider {oauth_account.provider}: {response.status_code}")
+                    all_refreshed = False
+        except Exception as e:
+            logger.exception(f"Error refreshing OAuth token for user {user.id}, provider {oauth_account.provider}: {str(e)}")
+            all_refreshed = False
+    
+    return max_expires_at, all_refreshed
+
 @router.get("/login/{provider}")
 def login(provider: str):
     """Initiate OAuth login flow with CSRF protection"""
@@ -68,13 +164,24 @@ def login(provider: str):
     # Create secure state token for CSRF protection
     state = create_state_token("login")
     
-    params = {
-        "client_id": config['client_id'],
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": config['scope'],
-        "state": state
-    }
+    # Steam uses OpenID 2.0, not OAuth 2.0
+    if provider == "steam":
+        params = {
+            "openid.ns": "http://specs.openid.net/auth/2.0",
+            "openid.mode": "checkid_setup",
+            "openid.return_to": redirect_uri,
+            "openid.realm": settings.BACKEND_CORS_ORIGINS[1],
+            "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
+            "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
+        }
+    else:
+        params = {
+            "client_id": config['client_id'],
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": config['scope'],
+            "state": state
+        }
     
     url = f"{config['auth_url']}?{urlencode(params)}"
     return RedirectResponse(url)
@@ -91,20 +198,34 @@ async def link(provider: str, current_user: User = Depends(deps.get_current_user
     # Create secure state token with user ID for linking
     state = create_state_token("link", str(current_user.id))
     
-    params = {
-        "client_id": config['client_id'],
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": config['scope'],
-        "state": state
-    }
+    # Steam uses OpenID 2.0, not OAuth 2.0
+    if provider == "steam":
+        # Add state to return_to for linking support
+        redirect_uri_with_state = f"{redirect_uri}?state={state}"
+        params = {
+            "openid.ns": "http://specs.openid.net/auth/2.0",
+            "openid.mode": "checkid_setup",
+            "openid.return_to": redirect_uri_with_state,
+            "openid.realm": settings.BACKEND_CORS_ORIGINS[1],
+            "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
+            "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
+        }
+    else:
+        params = {
+            "client_id": config['client_id'],
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": config['scope'],
+            "state": state
+        }
     
     url = f"{config['auth_url']}?{urlencode(params)}"
-    return {"url": url}
+    return RedirectResponse(url)
 
 @router.get("/callback/{provider}")
 async def callback(
     provider: str, 
+    request: Request,
     code: str = None,
     error: str = None,
     error_description: str = None,
@@ -118,85 +239,231 @@ async def callback(
         error_params = urlencode({"error": "oauth_error"})
         return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
     
-    if not code or not state:
-        error_params = urlencode({"error": "invalid_request"})
-        return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
-    
     if provider not in PROVIDERS:
         error_params = urlencode({"error": "invalid_provider"})
-        return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
-    
-    # Verify state token (CSRF protection)
-    try:
-        state_data = verify_state_token(state)
-        action = state_data.get("action")
-        user_id = state_data.get("user_id")
-    except Exception:
-        error_params = urlencode({"error": "invalid_state"})
         return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
     
     config = PROVIDERS[provider]
     redirect_uri = f"{settings.BACKEND_CORS_ORIGINS[1]}{settings.API_V1_STR}/auth/callback/{provider}"
     
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(config["token_url"], data={
-                "client_id": config["client_id"],
-                "client_secret": config["client_secret"],
-                "code": code,
-                "grant_type": "authorization_code",
-                "redirect_uri": redirect_uri,
-            })
+        # Steam uses OpenID 2.0, handle differently
+        if provider == "steam":
+            # Steam returns OpenID parameters in query string
+            openid_params = dict(request.query_params)
             
-            if response.status_code != 200:
-                error_params = urlencode({"error": "token_error"})
+            if "openid.mode" not in openid_params or openid_params.get("openid.mode") != "id_res":
+                error_params = urlencode({"error": "invalid_request"})
                 return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
             
-            token_data = response.json()
-            access_token = token_data["access_token"]
-            refresh_token = token_data.get("refresh_token")
-            expires_in = token_data.get("expires_in")
-            if expires_in is not None:
+            # Extract state if present (for linking)
+            state = openid_params.get("state")
+            if state:
                 try:
-                    expires_in = int(expires_in)
-                except (ValueError, TypeError):
-                    logger.warning(f"Invalid expires_in value: {expires_in}, treating as None")
-                    expires_in = None
+                    state_data = verify_state_token(state)
+                    action = state_data.get("action")
+                    user_id = state_data.get("user_id")
+                except Exception:
+                    # Invalid or expired state token - return error instead of fallback to login
+                    # This prevents security issues where invalid linking attempts become logins
+                    logger.warning(f"Invalid state token for Steam callback: {state[:20] if state else 'None'}")
+                    error_params = urlencode({"error": "invalid_state"})
+                    return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
+            else:
+                # No state means this is a login flow (not linking)
+                action = "login"
+                user_id = None
             
-            headers = {"Authorization": f"Bearer {access_token}"}
-            if provider == "twitch":
-                headers["Client-Id"] = config["client_id"]
+            # Verify OpenID assertion
+            verify_data = {}
+            
+            # Copy all openid.* parameters for verification
+            # This is critical - Steam checks that all parameters match exactly
+            for key, value in openid_params.items():
+                if key.startswith("openid."):
+                    # Change mode from id_res to check_authentication
+                    if key == "openid.mode":
+                        verify_data[key] = "check_authentication"
+                    else:
+                        verify_data[key] = value
+            
+            # Verify that we have all required parameters
+            required_params = ["openid.mode", "openid.ns", "openid.op_endpoint", "openid.claimed_id", 
+                             "openid.identity", "openid.return_to", "openid.response_nonce", 
+                             "openid.assoc_handle", "openid.signed", "openid.sig"]
+            missing_params = [p for p in required_params if p not in verify_data]
+            if missing_params:
+                logger.warning(f"Missing required OpenID parameters: {missing_params}")
+            
+            if "openid.signed" in verify_data:
+                signed_params = verify_data["openid.signed"].split(",")
+                # Check that all signed parameters are present
+                for param in signed_params:
+                    full_param = f"openid.{param}" if not param.startswith("openid.") else param
+                    if full_param not in verify_data:
+                        logger.error(f"Missing signed parameter: {full_param}")
+            
+            async with httpx.AsyncClient(follow_redirects=False, timeout=10.0) as client:
+                # Steam OpenID expects application/x-www-form-urlencoded
+                headers = {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": "PolystirolHub/1.0"
+                }
                 
-            user_response = await client.get(config["user_url"], headers=headers)
-            
-            if user_response.status_code != 200:
-                error_params = urlencode({"error": "user_info_error"})
+                verify_response = await client.post(
+                    config["openid_verify_url"], 
+                    data=verify_data,
+                    headers=headers
+                )
+                
+                # Steam should return text/plain, not text/html
+                content_type = verify_response.headers.get('Content-Type', '').lower()
+                if 'text/html' in content_type:
+                    logger.error("Steam returned HTML instead of text/plain. This usually means the request was invalid or redirected.")
+                    if verify_response.status_code == 302:
+                        location = verify_response.headers.get('Location', '')
+                        logger.error(f"302 redirect to: {location}")
+                    error_params = urlencode({"error": "token_error"})
+                    return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
+                
+                verify_text = verify_response.text
+                
+                # Steam returns plain text in format: "is_valid:true" or "is_valid:false"
+                is_valid = False
+                
+                # Try to parse the response
+                if verify_text:
+                    for line in verify_text.split('\n'):
+                        line = line.strip()
+                        if line.startswith('is_valid:'):
+                            is_valid_value = line.split(':', 1)[1].strip().lower()
+                            is_valid = is_valid_value == 'true'
+                            break
+                
+                # If we got 302, it might be an error, but check body first
+                if verify_response.status_code == 302:
+                    if not is_valid:
+                        logger.error("Steam returned 302 without is_valid in response body")
+                        error_params = urlencode({"error": "token_error"})
+                        return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
+                
+                if not is_valid:
+                    logger.error(f"Steam OpenID verification failed. Status: {verify_response.status_code}, Response: {verify_text[:200]}")
+                    error_params = urlencode({"error": "token_error"})
+                    return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
+                
+                # Extract Steam ID from openid.identity
+                identity = openid_params.get("openid.identity", "")
+                if not identity.startswith("https://steamcommunity.com/openid/id/"):
+                    error_params = urlencode({"error": "invalid_identity"})
+                    return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
+                
+                steam_id = identity.replace("https://steamcommunity.com/openid/id/", "")
+                provider_account_id = steam_id
+                
+                # Get user data from Steam Web API
+                if not config.get("api_key"):
+                    logger.error("STEAM_API_KEY is not configured")
+                    error_params = urlencode({"error": "config_error"})
+                    return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
+                
+                api_url = f"{config['api_url']}?key={config['api_key']}&steamids={steam_id}"
+                user_response = await client.get(api_url)
+                
+                if user_response.status_code != 200:
+                    logger.error(f"Steam API error: {user_response.status_code}, {user_response.text}")
+                    error_params = urlencode({"error": "user_info_error"})
+                    return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
+                
+                user_data = user_response.json()
+                players = user_data.get("response", {}).get("players", [])
+                
+                if not players:
+                    logger.error(f"Steam API returned no players: {user_data}")
+                    error_params = urlencode({"error": "user_info_error"})
+                    return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
+                
+                player = players[0]
+                username = player.get("personaname", "")
+                avatar = player.get("avatarfull") or player.get("avatarmedium", "")
+                email = None  # Steam doesn't provide email via OpenID
+                access_token = steam_id  # Store Steam ID as access_token
+                refresh_token = None  # Steam doesn't use refresh tokens
+                expires_in = None
+                
+        else:
+            # Standard OAuth 2.0 flow
+            if not code or not state:
+                error_params = urlencode({"error": "invalid_request"})
                 return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
             
-            user_data = user_response.json()
+            # Verify state token (CSRF protection)
+            try:
+                state_data = verify_state_token(state)
+                action = state_data.get("action")
+                user_id = state_data.get("user_id")
+            except Exception:
+                error_params = urlencode({"error": "invalid_state"})
+                return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
             
-            provider_account_id = ""
-            email = ""
-            username = ""
-            avatar = ""
-            
-            if provider == "twitch":
-                data = user_data["data"][0]
-                provider_account_id = data["id"]
-                email = data.get("email")
-                username = data["login"]
-                avatar = data.get("profile_image_url", "")
-            elif provider == "discord":
-                provider_account_id = user_data["id"]
-                email = user_data.get("email")
-                username = user_data["username"]
-                avatar_hash = user_data.get("avatar")
-                if avatar_hash:
-                    avatar = f"https://cdn.discordapp.com/avatars/{provider_account_id}/{avatar_hash}.png?size=512"
-                else:
-                    discriminator = user_data.get("discriminator", "0")
-                    discriminator_mod = int(discriminator) % 5
-                    avatar = f"https://cdn.discordapp.com/embed/avatars/{discriminator_mod}.png"
+            async with httpx.AsyncClient() as client:
+                response = await client.post(config["token_url"], data={
+                    "client_id": config["client_id"],
+                    "client_secret": config["client_secret"],
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": redirect_uri,
+                })
+                
+                if response.status_code != 200:
+                    error_params = urlencode({"error": "token_error"})
+                    return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
+                
+                token_data = response.json()
+                access_token = token_data["access_token"]
+                refresh_token = token_data.get("refresh_token")
+                expires_in = token_data.get("expires_in")
+                if expires_in is not None:
+                    try:
+                        expires_in = int(expires_in)
+                    except (ValueError, TypeError):
+                        logger.warning(f"Invalid expires_in value: {expires_in}, treating as None")
+                        expires_in = None
+                
+                headers = {"Authorization": f"Bearer {access_token}"}
+                if provider == "twitch":
+                    headers["Client-Id"] = config["client_id"]
+                    
+                user_response = await client.get(config["user_url"], headers=headers)
+                
+                if user_response.status_code != 200:
+                    error_params = urlencode({"error": "user_info_error"})
+                    return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
+                
+                user_data = user_response.json()
+                
+                provider_account_id = ""
+                email = ""
+                username = ""
+                avatar = ""
+                
+                if provider == "twitch":
+                    data = user_data["data"][0]
+                    provider_account_id = data["id"]
+                    email = data.get("email")
+                    username = data["login"]
+                    avatar = data.get("profile_image_url", "")
+                elif provider == "discord":
+                    provider_account_id = user_data["id"]
+                    email = user_data.get("email")
+                    username = user_data["username"]
+                    avatar_hash = user_data.get("avatar")
+                    if avatar_hash:
+                        avatar = f"https://cdn.discordapp.com/avatars/{provider_account_id}/{avatar_hash}.png?size=512"
+                    else:
+                        discriminator = user_data.get("discriminator", "0")
+                        discriminator_mod = int(discriminator) % 5
+                        avatar = f"https://cdn.discordapp.com/embed/avatars/{discriminator_mod}.png"
 
         # Check if OAuth account exists
         result = await db.execute(select(OAuthAccount).where(
@@ -216,30 +483,60 @@ async def callback(
                 error_params = urlencode({"error": "link_error"})
                 return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
             
+            # Check if this provider account is already linked to another user
             if oauth_account:
                 if oauth_account.user_id != user.id:
                     error_params = urlencode({"error": "already_linked"})
                     return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
                 
+                # Update existing OAuth account (refresh tokens)
                 oauth_account.access_token = access_token
                 oauth_account.refresh_token = refresh_token
+                oauth_account.provider_username = username
+                oauth_account.provider_avatar = avatar
+                if expires_in:
+                    oauth_account.expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                else:
+                    oauth_account.expires_at = None
                 await db.commit()
             else:
+                # Create new OAuth account link
                 new_oauth = OAuthAccount(
                     user_id=user.id,
                     provider=provider,
                     provider_account_id=provider_account_id,
+                    provider_username=username,
+                    provider_avatar=avatar,
                     access_token=access_token,
                     refresh_token=refresh_token,
-                    expires_at=datetime.utcnow() + timedelta(seconds=expires_in) if expires_in else None
+                    expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in) if expires_in else None
                 )
                 db.add(new_oauth)
                 await db.commit()
                 
+                # Обновляем прогресс для link_all_platforms
+                try:
+                    from app.services.quest_progress import update_progress as update_quest_progress
+                    # Подсчитываем количество привязанных OAuth провайдеров (twitch, discord, steam)
+                    result = await db.execute(
+                        select(OAuthAccount).where(
+                            and_(
+                                OAuthAccount.user_id == user.id,
+                                OAuthAccount.provider.in_(["twitch", "discord", "steam"])
+                            )
+                        )
+                    )
+                    linked_providers = result.scalars().all()
+                    linked_count = len(linked_providers)
+                    await update_quest_progress("link_all_platforms", user.id, 0, db, absolute_value=linked_count)
+                except Exception as e:
+                    logger.error(f"Error updating quest progress for link_all_platforms: {e}")
+                
+            # Return success - DO NOT create JWT tokens for linking
             success_params = urlencode({"success": "true"})
             return RedirectResponse(f"{settings.FRONTEND_URL}/auth/link-success?{success_params}")
 
-        # Handle Login
+        # Handle Login (only if not linking)
         if oauth_account:
             result = await db.execute(select(User).where(User.id == oauth_account.user_id))
             user = result.scalars().first()
@@ -251,27 +548,69 @@ async def callback(
             
             oauth_account.access_token = access_token
             oauth_account.refresh_token = refresh_token
+            oauth_account.provider_username = username
+            oauth_account.provider_avatar = avatar
             if expires_in:
-                oauth_account.expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+                oauth_account.expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+            else:
+                oauth_account.expires_at = None
             await db.commit()
         else:
+            # Only search by email if it exists (Steam doesn't provide email)
             if email:
                 result = await db.execute(select(User).where(User.email == email))
                 user = result.scalars().first()
             
             if not user:
-                user = User(email=email, username=username, avatar=avatar if avatar else None)
+                # For Steam, username is just a display name and not unique
+                # If username already exists, make it unique by adding a suffix
+                final_username = username
+                if username:
+                    base_username = username
+                    counter = 1
+                    while True:
+                        result = await db.execute(select(User).where(User.username == final_username))
+                        existing = result.scalars().first()
+                        if not existing:
+                            break
+                        final_username = f"{base_username}{counter}"
+                        counter += 1
+                        if counter > 100:  # Safety limit
+                            final_username = f"{base_username}_{secrets.token_hex(4)}"
+                            break
+                
+                user = User(email=email, username=final_username, avatar=avatar if avatar else None)
                 db.add(user)
                 await db.commit()
                 await db.refresh(user)
+                
+                # Создаем событие активности для нового пользователя
+                try:
+                    from app.services.activity import create_activity
+                    from app.models.activity import ActivityType
+                    await create_activity(
+                        db=db,
+                        activity_type=ActivityType.new_user,
+                        title="Новый игрок присоединился",
+                        description=f"{final_username} зарегистрировался",
+                        user_id=user.id,
+                        meta_data={
+                            "username": final_username,
+                            "provider": provider
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create new_user activity for user {user.id}: {e}", exc_info=True)
             
             new_oauth = OAuthAccount(
                 user_id=user.id,
                 provider=provider,
                 provider_account_id=provider_account_id,
+                provider_username=username,
+                provider_avatar=avatar,
                 access_token=access_token,
                 refresh_token=refresh_token,
-                expires_at=datetime.utcnow() + timedelta(seconds=expires_in) if expires_in else None
+                expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in) if expires_in else None
             )
             db.add(new_oauth)
             await db.commit()
@@ -282,19 +621,54 @@ async def callback(
             error_params = urlencode({"error": "user_creation_failed"})
             return RedirectResponse(f"{settings.FRONTEND_URL}/auth/error?{error_params}")
 
-        # Create JWT and set as HTTP-only cookie
+        # Create JWT access token
         access_token_jwt = create_access_token(subject=user.id)
+        
+        # Create refresh token
+        refresh_token_value = create_refresh_token()
+        
+        # Calculate refresh token TTL: minimum 30 days or OAuth token expiration if longer
+        min_refresh_ttl = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60  # 30 days in seconds
+        refresh_ttl = min_refresh_ttl
+        
+        # Check all OAuth token expirations to find maximum
+        result = await db.execute(
+            select(OAuthAccount).where(OAuthAccount.user_id == user.id)
+        )
+        all_oauth_accounts = result.scalars().all()
+        
+        for acc in all_oauth_accounts:
+            if acc.expires_at:
+                oauth_ttl = int((acc.expires_at - datetime.now(timezone.utc)).total_seconds())
+                if oauth_ttl > refresh_ttl:
+                    refresh_ttl = oauth_ttl
+        
+        # Save refresh token to Redis
+        await save_refresh_token(str(user.id), refresh_token_value, refresh_ttl)
         
         response = RedirectResponse(f"{settings.FRONTEND_URL}/auth/success")
         
-        # Set HTTP-only cookie for security
+        # Set HTTP-only cookies for security
+        is_secure = settings.FRONTEND_URL.startswith("https")
+        
+        # Access token cookie (30 minutes)
         response.set_cookie(
             key="access_token",
             value=access_token_jwt,
             httponly=True,  # Prevents JavaScript access
-            secure=settings.FRONTEND_URL.startswith("https"),  # Only send over HTTPS in production
+            secure=is_secure,  # Only send over HTTPS in production
             samesite="lax",  # CSRF protection
             max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        )
+        
+        # Refresh token cookie (30+ days)
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token_value,
+            httponly=True,
+            secure=is_secure,
+            samesite="lax",
+            max_age=refresh_ttl
         )
         
         return response
@@ -313,6 +687,93 @@ async def get_current_user_info(current_user: User = Depends(deps.get_current_us
         "username": current_user.username,
         "avatar": current_user.avatar,
         "is_active": current_user.is_active,
+        "is_admin": current_user.is_admin,
+        "is_super_admin": current_user.is_super_admin,
+        "selected_badge_id": str(current_user.selected_badge_id) if current_user.selected_badge_id else None,
+        "created_at": current_user.created_at.isoformat()
+    }
+
+@router.get("/me/providers", response_model=List[OAuthAccountPublic])
+async def get_user_providers(
+    current_user: User = Depends(deps.get_current_user),
+    db: AsyncSession = Depends(deps.get_db)
+):
+    """Get list of linked OAuth providers for current user"""
+    result = await db.execute(
+        select(OAuthAccount).where(OAuthAccount.user_id == current_user.id)
+    )
+    oauth_accounts = result.scalars().all()
+    return [OAuthAccountPublic.model_validate(account) for account in oauth_accounts]
+
+@router.post("/me/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user: User = Depends(deps.get_current_user),
+    db: AsyncSession = Depends(deps.get_db)
+):
+    """Upload avatar image for current user"""
+    # Валидация типа файла
+    allowed_content_types = ["image/jpeg", "image/png", "image/webp"]
+    if file.content_type not in allowed_content_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed types: {', '.join(allowed_content_types)}"
+        )
+    
+    # Валидация размера файла (5MB)
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+    file_content = await file.read()
+    if len(file_content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size is {MAX_FILE_SIZE / 1024 / 1024}MB"
+        )
+    
+    # Определяем расширение файла
+    content_type_to_ext = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp"
+    }
+    file_ext = content_type_to_ext.get(file.content_type, "jpg")
+    
+    # Генерируем уникальное имя файла
+    file_id = str(uuid.uuid4())
+    file_name = f"{current_user.id}_{file_id}.{file_ext}"
+    file_path = file_name  # Базовый путь уже содержит avatars в STORAGE_LOCAL_PATH
+    
+    # Сохраняем файл через storage service
+    storage = get_storage()
+    avatar_url = await storage.save(file_content, file_path)
+    
+    # Удаляем старый аватар если он существует и это локальный файл
+    if current_user.avatar:
+        old_avatar = current_user.avatar
+        # Проверяем, является ли старый аватар локальным файлом
+        # Может быть полный URL (http://localhost:8000/static/avatars/...) или относительный (/static/avatars/...)
+        local_base_url = settings.STORAGE_AVATARS_BASE_URL
+        full_base_url = f"{settings.BACKEND_BASE_URL}{local_base_url}"
+        
+        if old_avatar.startswith(full_base_url) or old_avatar.startswith(local_base_url):
+            # Извлекаем путь из URL
+            old_path = old_avatar.replace(full_base_url, "").replace(local_base_url, "").lstrip("/")
+            try:
+                await storage.delete(old_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete old avatar {old_path}: {e}")
+    
+    # Обновляем аватар в БД
+    current_user.avatar = avatar_url
+    await db.commit()
+    await db.refresh(current_user)
+    
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "username": current_user.username,
+        "avatar": current_user.avatar,
+        "is_active": current_user.is_active,
+        "selected_badge_id": str(current_user.selected_badge_id) if current_user.selected_badge_id else None,
         "created_at": current_user.created_at.isoformat()
     }
 
@@ -342,7 +803,27 @@ async def update_current_user(
         current_user.username = update_data["username"]
     
     if "avatar" in update_data:
-        current_user.avatar = update_data["avatar"]
+        # Если новый аватар - это URL (обратная совместимость)
+        new_avatar = update_data["avatar"]
+        old_avatar = current_user.avatar
+        
+        # Удаляем старый локальный файл если он существует и это локальный файл
+        if old_avatar:
+            # Проверяем, является ли старый аватар локальным файлом
+            # Может быть полный URL (http://localhost:8000/static/avatars/...) или относительный (/static/avatars/...)
+            local_base_url = settings.STORAGE_AVATARS_BASE_URL
+            full_base_url = f"{settings.BACKEND_BASE_URL}{local_base_url}"
+            
+            if old_avatar.startswith(full_base_url) or old_avatar.startswith(local_base_url):
+                # Извлекаем путь из URL
+                old_path = old_avatar.replace(full_base_url, "").replace(local_base_url, "").lstrip("/")
+                try:
+                    storage = get_storage()
+                    await storage.delete(old_path)
+                except Exception as e:
+                    logger.warning(f"Failed to delete old avatar {old_path}: {e}")
+        
+        current_user.avatar = new_avatar
     
     if "is_active" in update_data:
         current_user.is_active = update_data["is_active"]
@@ -356,11 +837,247 @@ async def update_current_user(
         "username": current_user.username,
         "avatar": current_user.avatar,
         "is_active": current_user.is_active,
+        "selected_badge_id": str(current_user.selected_badge_id) if current_user.selected_badge_id else None,
         "created_at": current_user.created_at.isoformat()
     }
 
+@router.post("/refresh")
+async def refresh(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(deps.get_db)
+):
+    """Refresh access token using refresh token"""
+    refresh_token_value = request.cookies.get("refresh_token")
+    
+    if not refresh_token_value:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token not found"
+        )
+    
+    # Get user_id from Redis
+    user_id = await get_refresh_token(refresh_token_value)
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token"
+        )
+    
+    # Use lock to prevent race condition when multiple requests try to refresh simultaneously
+    lock_key = f"token_refresh_lock:{user_id}"
+    lock_acquired = await acquire_lock(lock_key, timeout=10)
+    
+    if not lock_acquired:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Token refresh in progress, please try again"
+        )
+    
+    try:
+        # Verify refresh token still exists (might have been refreshed by another request)
+        current_user_id = await get_refresh_token(refresh_token_value)
+        if not current_user_id or current_user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token was already used"
+            )
+        
+        # Get user from database
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalars().first()
+        
+        if not user:
+            # Clean up invalid token
+            await delete_refresh_token(refresh_token_value)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found"
+            )
+        
+        # Refresh OAuth tokens if needed
+        max_expires_at, _ = await refresh_oauth_token_if_needed(user, db)
+        
+        # Create new tokens (rotation)
+        new_access_token = create_access_token(subject=user.id)
+        new_refresh_token = create_refresh_token()
+        
+        # Calculate new refresh token TTL
+        min_refresh_ttl = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+        refresh_ttl = min_refresh_ttl
+        
+        if max_expires_at:
+            oauth_ttl = int((max_expires_at - datetime.now(timezone.utc)).total_seconds())
+            if oauth_ttl > refresh_ttl:
+                refresh_ttl = oauth_ttl
+        
+        # Atomic swap: save new token BEFORE deleting old one
+        await save_refresh_token(str(user.id), new_refresh_token, refresh_ttl)
+        await delete_refresh_token(refresh_token_value)
+        
+        # Update cookies
+        is_secure = settings.FRONTEND_URL.startswith("https")
+        
+        response.set_cookie(
+            key="access_token",
+            value=new_access_token,
+            httponly=True,
+            secure=is_secure,
+            samesite="lax",
+            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        )
+        
+        response.set_cookie(
+            key="refresh_token",
+            value=new_refresh_token,
+            httponly=True,
+            secure=is_secure,
+            samesite="lax",
+            max_age=refresh_ttl
+        )
+        
+        return {"message": "Tokens refreshed successfully"}
+    finally:
+        await release_lock(lock_key)
+
 @router.post("/logout")
-async def logout(response: Response):
-    """Logout user by clearing the authentication cookie"""
-    response.delete_cookie(key="access_token")
-    return {"message": "Successfully logged out"}
+async def logout(request: Request, response: Response):
+	"""Logout user by clearing the authentication cookies and refresh token"""
+	# Delete refresh token from Redis if exists
+	refresh_token_value = request.cookies.get("refresh_token")
+	if refresh_token_value:
+		await delete_refresh_token(refresh_token_value)
+	
+	# Delete cookies
+	response.delete_cookie(key="access_token")
+	response.delete_cookie(key="refresh_token")
+	return {"message": "Successfully logged out"}
+
+@router.delete("/unlink/{provider}")
+async def unlink_provider(
+	provider: str,
+	current_user: User = Depends(deps.get_current_user),
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""Unlink OAuth provider from current user account"""
+	if provider not in PROVIDERS:
+		raise HTTPException(status_code=400, detail="Provider not supported")
+	
+	# Get all OAuth accounts for user
+	result = await db.execute(
+		select(OAuthAccount).where(OAuthAccount.user_id == current_user.id)
+	)
+	oauth_accounts = result.scalars().all()
+	
+	# Check if user has more than one provider
+	if len(oauth_accounts) <= 1:
+		raise HTTPException(
+			status_code=400,
+			detail="Cannot unlink the only remaining provider. Add another provider first or delete your account."
+		)
+	
+	# Find the provider account to unlink
+	provider_account = None
+	for account in oauth_accounts:
+		if account.provider == provider:
+			provider_account = account
+			break
+	
+	if not provider_account:
+		raise HTTPException(
+			status_code=404,
+			detail=f"Provider {provider} is not linked to your account"
+		)
+	
+	# Delete the OAuth account
+	await db.execute(delete(OAuthAccount).where(OAuthAccount.id == provider_account.id))
+	await db.commit()
+	
+	return {"message": f"Provider {provider} has been unlinked successfully"}
+
+def generate_link_code() -> str:
+	"""Generate link code in format XXXX-YYYY (alphanumeric, uppercase)"""
+	import string
+	chars = string.ascii_uppercase + string.digits
+	part1 = ''.join(secrets.choice(chars) for _ in range(4))
+	part2 = ''.join(secrets.choice(chars) for _ in range(4))
+	return f"{part1}-{part2}"
+
+@router.post("/generate-link-code", response_model=LinkCodeGenerateResponse)
+async def generate_link_code_endpoint(
+	current_user: User = Depends(deps.get_current_user)
+):
+	"""Generate a one-time link code for linking game UUID to user account"""
+	code = generate_link_code()
+	await save_link_code(code, str(current_user.id), ttl=300)
+	return LinkCodeGenerateResponse(link_code=code)
+
+@router.post("/link", response_model=LinkResponse)
+async def link_game_account(
+	link_data: LinkRequest,
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""Link game UUID to user account using one-time link code"""
+	# Get and delete code from Redis (one-time use)
+	user_id = await get_link_code(link_data.link_code)
+	if not user_id:
+		raise HTTPException(
+			status_code=status.HTTP_400_BAD_REQUEST,
+			detail="Invalid or expired link code"
+		)
+	
+	# Delete code immediately after use
+	await delete_link_code(link_data.link_code)
+	
+	# Check if this (platform, game_id) is already linked
+	result = await db.execute(
+		select(ExternalLink).where(
+			ExternalLink.platform == link_data.platform,
+			ExternalLink.external_id == link_data.game_id
+		)
+	)
+	existing_link = result.scalars().first()
+	if existing_link:
+		raise HTTPException(
+			status_code=status.HTTP_409_CONFLICT,
+			detail="This game ID is already linked"
+		)
+	
+	# Create new external link
+	external_link = ExternalLink(
+		user_id=uuid.UUID(user_id),
+		platform=link_data.platform,
+		external_id=link_data.game_id,
+		platform_username=link_data.platform_username
+	)
+	db.add(external_link)
+	await db.commit()
+	
+	return LinkResponse(status="success", message="Game account linked successfully")
+
+@router.get("/check-link-status/{user_id}", response_model=LinkStatusResponse)
+async def check_link_status(
+	user_id: UUID,
+	db: AsyncSession = Depends(deps.get_db)
+):
+	"""Check link status for a user by user_id"""
+	# Verify user exists
+	result = await db.execute(select(User).where(User.id == user_id))
+	user = result.scalars().first()
+	if not user:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail="User not found"
+		)
+	
+	# Get all external links for this user
+	result = await db.execute(
+		select(ExternalLink).where(ExternalLink.user_id == user_id)
+	)
+	external_links = result.scalars().all()
+	
+	return LinkStatusResponse(
+		user_id=user_id,
+		links=[ExternalLinkResponse.model_validate(link) for link in external_links]
+	)

@@ -8,6 +8,11 @@ class UserBase(BaseModel):
     username: Optional[str] = None
     avatar: Optional[str] = None
     is_active: Optional[bool] = True
+    is_admin: Optional[bool] = False
+    is_super_admin: Optional[bool] = False
+    xp: Optional[int] = 0
+    level: Optional[int] = 1
+    selected_badge_id: Optional[UUID] = None
 
 class UserCreate(UserBase):
     pass
@@ -42,6 +47,28 @@ class OAuthAccount(OAuthAccountBase):
     id: UUID
     user_id: UUID
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class OAuthAccountPublic(BaseModel):
+    """Public schema for OAuth account - safe to return to client"""
+    provider: str
+    provider_username: Optional[str] = None
+    provider_avatar: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class LeaderboardPlayer(BaseModel):
+    """Schema for player in leaderboard"""
+    id: UUID
+    username: Optional[str] = None
+    level: int
+    xp: int
+    avatar: Optional[str] = None
+    selected_badge_id: Optional[UUID] = None
 
     class Config:
         from_attributes = True
