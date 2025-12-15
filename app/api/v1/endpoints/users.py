@@ -3,7 +3,11 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select, desc
 from app.api import deps
-from app.models.user import User, OAuthAccount
+from app.models.user import User, OAuthAccount, ExternalLink, UserCounter
+from app.models.quest import UserQuest
+from app.models.badge import UserBadge, UserBadgeProgress
+from app.models.notification import Notification
+from app.models.activity import Activity
 from app.db.redis import delete_refresh_token, get_cache, set_cache, acquire_lock, release_lock
 from app.schemas.user import LeaderboardPlayer
 from app.core.progression import award_xp, get_progression_info
@@ -97,8 +101,20 @@ async def delete_current_user(
 	if refresh_token_value:
 		await delete_refresh_token(refresh_token_value)
 	
-	# Delete all OAuth accounts first (cascade doesn't work with delete().where())
+	# Delete all related data first (cascade doesn't work with delete().where())
 	await db.execute(delete(OAuthAccount).where(OAuthAccount.user_id == current_user.id))
+	await db.execute(delete(ExternalLink).where(ExternalLink.user_id == current_user.id))
+	await db.execute(delete(UserQuest).where(UserQuest.user_id == current_user.id))
+	await db.execute(delete(UserBadge).where(UserBadge.user_id == current_user.id))
+	await db.execute(delete(UserBadgeProgress).where(UserBadgeProgress.user_id == current_user.id))
+	await db.execute(delete(Notification).where(Notification.user_id == current_user.id))
+	await db.execute(delete(Activity).where(Activity.user_id == current_user.id))
+	await db.execute(delete(UserCounter).where(UserCounter.user_id == current_user.id))
+	
+	# Clear selected_badge_id before deleting user (it's a foreign key)
+	current_user.selected_badge_id = None
+	await db.flush()
+	
 	# Delete user from database
 	await db.execute(delete(User).where(User.id == current_user.id))
 	await db.commit()

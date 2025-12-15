@@ -38,3 +38,4 @@ def downgrade() -> None:
 	op.drop_column('game_servers', 'season_end')
 	op.drop_column('game_servers', 'season_start')
 
+
