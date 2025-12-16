@@ -129,26 +129,24 @@ async def create_quest(
 	# Проверяем, есть ли он в badge_conditions (для общих условий)
 	from app.core.badge_conditions import is_condition_valid, get_condition_info
 	
-	# Список доступных condition_key для квестов (включая специфичные для квестов)
-	quest_condition_keys = [
+	# Список специальных condition_key для квестов (не счетчики)
+	special_quest_condition_keys = [
 		"link_all_platforms",
 		"playtime_daily",
 		"server_join",
-		"blocks_traveled",
-		"messages_sent",
 		"deaths_in_session"
 	]
-	
+		
 	# Проверяем, валиден ли condition_key
 	is_badge_condition = is_condition_valid(condition_key)
-	is_quest_condition = condition_key in quest_condition_keys
+	is_special_quest_condition = condition_key in special_quest_condition_keys
 	
-	if not is_badge_condition and not is_quest_condition:
-		available_keys = ", ".join(quest_condition_keys)
-		raise HTTPException(
-			status_code=400,
-			detail=f"Invalid condition_key. Available values: {available_keys}. Use GET /api/v1/badges/conditions for badge conditions."
-		)
+	# Разрешаем любые ключи, так как система счетчиков универсальная
+	# Любой ключ может быть счетчиком и будет работать автоматически
+	if not is_badge_condition and not is_special_quest_condition:
+		# Это может быть новый счетчик - разрешаем
+		# Система UserCounters поддерживает любые ключи
+		pass
 	
 	# Если это badge condition, проверяем требования
 	if is_badge_condition:
@@ -240,23 +238,20 @@ async def update_quest(
 	if condition_key is not None:
 		# Валидация condition_key аналогично create
 		from app.core.badge_conditions import is_condition_valid
-		quest_condition_keys = [
+		special_quest_condition_keys = [
 			"link_all_platforms",
 			"playtime_daily",
 			"server_join",
-			"blocks_traveled",
-			"messages_sent",
 			"deaths_in_session"
 		]
 		is_badge_condition = is_condition_valid(condition_key)
-		is_quest_condition = condition_key in quest_condition_keys
+		is_special_quest_condition = condition_key in special_quest_condition_keys
 		
-		if not is_badge_condition and not is_quest_condition:
-			available_keys = ", ".join(quest_condition_keys)
-			raise HTTPException(
-				status_code=400,
-				detail=f"Invalid condition_key. Available values: {available_keys}"
-			)
+		# Разрешаем любые ключи, так как система счетчиков универсальная
+		# Любой ключ может быть счетчиком и будет работать автоматически
+		if not is_badge_condition and not is_special_quest_condition:
+			# Это может быть новый счетчик - разрешаем
+			pass
 		quest.condition_key = condition_key
 	if target_value is not None:
 		quest.target_value = target_value
