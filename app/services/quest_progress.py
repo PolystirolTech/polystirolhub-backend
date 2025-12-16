@@ -101,19 +101,31 @@ async def update_progress(
 		
 		# Обновляем прогресс только если еще не завершено
 		if user_quest.completed_at is None:
-			# Для счетчиков (blocks_traveled, messages_sent и т.д.) читаем значение из UserCounters
-			# Это обеспечивает синхронизацию между счетчиками и прогрессом квестов
-			counter_value = await get_counter(user_id, condition_key, db)
-			
-			if counter_value > 0:
-				# Используем значение из счетчика как источник истины
-				user_quest.progress = counter_value
-			elif absolute_value is not None:
-				# Устанавливаем абсолютное значение (но не меньше текущего)
-				user_quest.progress = max(user_quest.progress, absolute_value)
+			# Для daily квестов со счетчиками используем инкремент (значение за день)
+			# Для achievement квестов со счетчиками используем абсолютное значение из UserCounters
+			if quest.quest_type == QuestType.daily:
+				# Daily квесты: используем инкремент (значение за период между batch)
+				# Это правильно, т.к. счетчики в batch - это инкременты за период
+				if absolute_value is not None:
+					# Устанавливаем абсолютное значение (но не меньше текущего)
+					user_quest.progress = max(user_quest.progress, absolute_value)
+				else:
+					# Увеличиваем на increment (для счетчиков это инкремент за период)
+					user_quest.progress += increment
 			else:
-				# Увеличиваем на increment (для не-счетчиков)
-				user_quest.progress += increment
+				# Achievement квесты: используем абсолютное значение из UserCounters
+				# Это обеспечивает синхронизацию между счетчиками и прогрессом квестов
+				counter_value = await get_counter(user_id, condition_key, db)
+				
+				if counter_value > 0:
+					# Используем значение из счетчика как источник истины
+					user_quest.progress = counter_value
+				elif absolute_value is not None:
+					# Устанавливаем абсолютное значение (но не меньше текущего)
+					user_quest.progress = max(user_quest.progress, absolute_value)
+				else:
+					# Увеличиваем на increment (для не-счетчиков)
+					user_quest.progress += increment
 			
 			# Проверяем достижение цели
 			if quest.target_value and user_quest.progress >= quest.target_value:
