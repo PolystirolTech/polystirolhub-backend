@@ -53,8 +53,6 @@ services:
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-http://localhost:3000,http://localhost:8000}
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
     command: >
