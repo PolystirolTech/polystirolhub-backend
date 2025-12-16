@@ -19,7 +19,12 @@ async def lifespan(app: FastAPI):
 	shutdown_scheduler()
 
 
-app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
+app = FastAPI(
+	title=settings.PROJECT_NAME,
+	lifespan=lifespan,
+	docs_url="/docs" if settings.DEBUG else None,
+	redoc_url="/redoc" if settings.DEBUG else None
+)
 
 class TokenRefreshMiddleware(BaseHTTPMiddleware):
     """Middleware to set refreshed tokens in cookies if they were refreshed"""
