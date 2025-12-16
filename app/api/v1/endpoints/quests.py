@@ -159,16 +159,16 @@ async def create_quest(
 				)
 	
 	# Создаем квест
-		new_quest = QuestModel(
-			name=name,
-			description=description,
-			quest_type=quest_type_enum,
-			condition_key=condition_key,
-			target_value=target_value,
-			reward_xp=reward_xp,
-			reward_balance=reward_balance,
-			is_active=is_active
-		)
+	new_quest = QuestModel(
+		name=name,
+		description=description,
+		quest_type=quest_type_enum,
+		condition_key=condition_key,
+		target_value=target_value,
+		reward_xp=reward_xp,
+		reward_balance=reward_balance,
+		is_active=is_active
+	)
 	
 	db.add(new_quest)
 	await db.commit()
