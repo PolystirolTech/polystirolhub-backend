@@ -35,6 +35,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - .:/app
+      - uploads_data:/app/uploads
     ports:
       - "8000:8000"
     environment:
@@ -70,6 +71,7 @@ services:
 
 volumes:
   postgres_data:
+  uploads_data:
 
 networks:
   polystirolhub-network:
