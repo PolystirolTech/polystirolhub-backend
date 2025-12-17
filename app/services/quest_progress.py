@@ -56,6 +56,8 @@ async def update_progress(
 	for quest in quests:
 		if quest.quest_type == QuestType.daily:
 			# Для daily квестов проверяем quest_date (сегодняшняя дата)
+			# Daily квесты создаются только через initialize_daily_quests_for_user
+			# Если UserQuest нет - пропускаем этот квест (он не был выбран для игрока)
 			user_quest_result = await db.execute(
 				select(UserQuest).where(
 					and_(
@@ -67,15 +69,9 @@ async def update_progress(
 			)
 			user_quest = user_quest_result.scalar_one_or_none()
 			
-			# Если нет UserQuest для сегодня - создаем его
+			# Если нет UserQuest для сегодня - пропускаем этот квест
 			if not user_quest:
-				user_quest = UserQuest(
-					user_id=user_id,
-					quest_id=quest.id,
-					progress=0,
-					quest_date=today
-				)
-				db.add(user_quest)
+				continue
 		else:
 			# Для achievement квестов quest_date всегда NULL
 			user_quest_result = await db.execute(

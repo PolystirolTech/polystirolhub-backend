@@ -282,8 +282,8 @@ async def award_badge(
 			await create_activity(
 				db=db,
 				activity_type=ActivityType.badge_earned,
-				title=f"{username} получил бейдж",
-				description=f"Бейдж: {badge.name}",
+				title=f"{username} получил бадж",
+				description=f"Бадж: {badge.name}",
 				user_id=user_id,
 				meta_data={
 					"badge_id": str(badge.id),
