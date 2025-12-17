@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Form, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, noload
 from typing import Optional
 from datetime import date
 from app.api import deps
@@ -30,13 +30,22 @@ async def get_quests(
 	"""Публичный список всех активных квестов"""
 	result = await db.execute(
 		select(QuestModel)
+		.options(noload(QuestModel.user_quests))
 		.where(QuestModel.is_active)
+		.distinct()
 		.order_by(QuestModel.created_at.desc())
 		.offset(skip)
 		.limit(limit)
 	)
 	quests = result.scalars().all()
-	return quests
+	# Удаляем дубликаты по ID на уровне Python (на случай если они все же появятся)
+	seen_ids = set()
+	unique_quests = []
+	for quest in quests:
+		if quest.id not in seen_ids:
+			seen_ids.add(quest.id)
+			unique_quests.append(quest)
+	return unique_quests
 
 # ========== Пользовательские эндпоинты ==========
 
