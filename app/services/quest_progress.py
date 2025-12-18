@@ -5,7 +5,7 @@ from typing import Optional
 from uuid import UUID
 from datetime import datetime, date, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, delete
 import random
 import logging
 
@@ -283,24 +283,56 @@ async def initialize_daily_quests_for_user(
 	
 	# Проверяем, какие квесты уже есть у пользователя на эту дату
 	existing_result = await db.execute(
-		select(UserQuest.quest_id).where(
+		select(UserQuest).where(
 			and_(
 				UserQuest.user_id == user_id,
-				UserQuest.quest_date == target_date
+				UserQuest.quest_date == target_date,
+				UserQuest.quest.has(Quest.quest_type == QuestType.daily)
 			)
 		)
 	)
-	existing_quest_ids = {row[0] for row in existing_result.all()}
+	existing_user_quests = existing_result.scalars().all()
+	existing_quest_ids = {uq.quest_id for uq in existing_user_quests}
 	
+	# Если у пользователя больше 3 daily квестов - удаляем лишние, оставляя 3 случайных
+	if len(existing_quest_ids) > 3:
+		# Выбираем 3 случайных квеста из существующих
+		selected_existing_quests = random.sample(existing_user_quests, 3)
+		selected_existing_quest_ids = {uq.quest_id for uq in selected_existing_quests}
+		
+		# Удаляем лишние UserQuest записи
+		quests_to_delete = [uq.id for uq in existing_user_quests if uq.quest_id not in selected_existing_quest_ids]
+		if quests_to_delete:
+			await db.execute(
+				delete(UserQuest).where(UserQuest.id.in_(quests_to_delete))
+			)
+			await db.commit()
+			logger.info(f"Removed {len(quests_to_delete)} extra daily quests for user {user_id} on {target_date}, kept 3")
+		
+		# Проверяем выполнение условий для оставшихся квестов
+		selected_quests = [q for q in all_daily_quests if q.id in selected_existing_quest_ids]
+		await check_initial_quest_conditions(user_id, selected_quests, db)
+		return
+	
+	# Если у пользователя ровно 3 daily квестов - ничего не делаем
+	if len(existing_quest_ids) == 3:
+		logger.info(f"User {user_id} already has 3 daily quests for {target_date}")
+		# Проверяем выполнение условий для существующих квестов
+		selected_quests = [q for q in all_daily_quests if q.id in existing_quest_ids]
+		await check_initial_quest_conditions(user_id, selected_quests, db)
+		return
+	
+	# Если меньше 3 - создаем недостающие до 3
 	# Фильтруем квесты, которых еще нет
 	available_quests = [q for q in all_daily_quests if q.id not in existing_quest_ids]
 	
 	if not available_quests:
-		logger.info(f"User {user_id} already has all daily quests for {target_date}")
+		logger.info(f"User {user_id} already has all available daily quests for {target_date}")
 		return
 	
-	# Выбираем 3 случайных квеста (или все доступные, если их меньше 3)
-	num_quests = min(3, len(available_quests))
+	# Выбираем недостающее количество квестов (до 3)
+	num_quests_needed = 3 - len(existing_quest_ids)
+	num_quests = min(num_quests_needed, len(available_quests))
 	selected_quests = random.sample(available_quests, num_quests)
 	
 	# Создаем UserQuest записи
@@ -314,7 +346,7 @@ async def initialize_daily_quests_for_user(
 		db.add(user_quest)
 	
 	await db.commit()
-	logger.info(f"Initialized {len(selected_quests)} daily quests for user {user_id} on {target_date}")
+	logger.info(f"Initialized {len(selected_quests)} daily quests for user {user_id} on {target_date} (total: {len(existing_quest_ids) + len(selected_quests)})")
 	
 	# Проверяем выполнение условий для только что созданных daily квестов
 	await check_initial_quest_conditions(user_id, selected_quests, db)
