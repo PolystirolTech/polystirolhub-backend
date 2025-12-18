@@ -172,11 +172,35 @@ class MessagesSentHandler(BaseConditionHandler):
 		return await get_counter(user_id, "messages_sent", db)
 
 
+class CurrencyAccumulatedHandler(BaseConditionHandler):
+	"""Обработчик для накопленной валюты."""
+	
+	async def calculate_progress(
+		self,
+		user_id: UUID,
+		config: Dict[str, Any],
+		db: AsyncSession
+	) -> int:
+		"""
+		Вычисляет количество накопленной валюты из UserCounters.
+		
+		Args:
+			user_id: UUID пользователя
+			config: Конфигурация условия
+			db: Асинхронная сессия базы данных
+			
+		Returns:
+			Количество накопленной валюты
+		"""
+		return await get_counter(user_id, "currency_accumulated", db)
+
+
 # Реестр обработчиков условий
 CONDITION_HANDLERS: Dict[str, type] = {
 	"xp_leader": XPLeaderHandler,
 	"deaths_in_session": DeathsInSessionHandler,
 	"playtime_leader_season": PlaytimeLeaderSeasonHandler,
 	"messages_sent": MessagesSentHandler,
+	"currency_accumulated": CurrencyAccumulatedHandler,
 }
 

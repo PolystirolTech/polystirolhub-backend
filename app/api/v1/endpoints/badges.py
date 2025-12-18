@@ -341,7 +341,7 @@ async def create_badge(
 	if condition_key:
 		from app.core.badge_conditions import is_condition_valid, get_condition_info
 		if not is_condition_valid(condition_key):
-			available_keys = ", ".join(["xp_leader", "deaths_in_session", "playtime_leader_season", "messages_sent"])
+			available_keys = ", ".join(["xp_leader", "deaths_in_session", "playtime_leader_season", "messages_sent", "currency_accumulated"])
 			raise HTTPException(
 				status_code=400,
 				detail=f"Invalid condition_key. Available values: {available_keys}. Use GET /api/v1/badges/conditions for details."

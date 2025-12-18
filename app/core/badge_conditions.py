@@ -12,6 +12,7 @@ class BadgeConditionKey(str, Enum):
 	DEATHS_IN_SESSION = "deaths_in_session"
 	PLAYTIME_LEADER_SEASON = "playtime_leader_season"
 	MESSAGES_SENT = "messages_sent"
+	CURRENCY_ACCUMULATED = "currency_accumulated"
 
 
 # Описания условий
@@ -49,6 +50,14 @@ CONDITION_DESCRIPTIONS: Dict[str, Dict[str, any]] = {
 		"requires_auto_check": False,
 		"handler": "MessagesSentHandler",
 		"status": "not_implemented"
+	},
+	"currency_accumulated": {
+		"name": "Накопить валюту",
+		"description": "Бейдж выдается за накопление определенного количества валюты за все время.",
+		"type": "event",
+		"requires_target_value": True,
+		"requires_auto_check": False,
+		"handler": "CurrencyAccumulatedHandler"
 	}
 }
 
