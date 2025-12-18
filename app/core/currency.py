@@ -7,7 +7,13 @@ from typing import Dict
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import logging
+
 from app.models.user import User
+from app.services.user_counters import increment_counter
+from app.services.badge_progress import update_progress
+
+logger = logging.getLogger(__name__)
 
 
 async def add_currency(
@@ -57,6 +63,14 @@ async def add_currency(
 	
 	await db.commit()
 	await db.refresh(user)
+	
+	# Обновляем счетчик накопленной валюты и прогресс баджиков
+	try:
+		await increment_counter(user_id, "currency_accumulated", amount, db)
+		await update_progress("currency_accumulated", user_id, amount, db)
+	except Exception as e:
+		# Логируем ошибку, но не прерываем выполнение основной операции
+		logger.error(f"Failed to update currency_accumulated counter or badge progress for user {user_id}: {e}", exc_info=True)
 	
 	return {
 		"balance": new_balance,
