@@ -10,8 +10,6 @@ from sqlalchemy import select
 import logging
 
 from app.models.user import User
-from app.services.user_counters import increment_counter
-from app.services.badge_progress import update_progress
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +63,11 @@ async def add_currency(
 	await db.refresh(user)
 	
 	# Обновляем счетчик накопленной валюты и прогресс баджиков
+	# Импорты внутри функции для избежания циклического импорта
 	try:
+		from app.services.user_counters import increment_counter
+		from app.services.badge_progress import update_progress
+		
 		await increment_counter(user_id, "currency_accumulated", amount, db)
 		await update_progress("currency_accumulated", user_id, amount, db)
 	except Exception as e:
