@@ -494,6 +494,10 @@ async def check_initial_quest_conditions(
 			# Для других условий (server_join, deaths_in_session, blocks_traveled, messages_sent)
 			# проверка не нужна при инициализации, т.к. они событийные
 			
+			# UPDATE: Для achievement квестов, основанных на счетчиках, нужно синхронизировать прогресс
+			elif quest.quest_type == QuestType.achievement:
+				await update_progress(quest.condition_key, user_id, 0, db)
+
 		except Exception as e:
 			logger.error(f"Error checking initial condition for quest {quest.id} ({quest.condition_key}): {e}", exc_info=True)
 
