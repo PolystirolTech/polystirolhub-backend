@@ -794,13 +794,21 @@ async def update_current_user(
             raise HTTPException(status_code=400, detail="Email already registered")
         current_user.email = update_data["email"]
     
-    if "username" in update_data and update_data["username"] is not None:
-        # Check if username is already taken by another user
-        result = await db.execute(select(User).where(User.username == update_data["username"]))
-        existing_user = result.scalars().first()
-        if existing_user and existing_user.id != current_user.id:
-            raise HTTPException(status_code=400, detail="Username already taken")
-        current_user.username = update_data["username"]
+    # Обновляем username независимо от наличия email в запросе
+    if "username" in update_data:
+        # Разрешаем обновление username даже если он None или пустая строка
+        new_username = update_data["username"]
+        # Если username не None и не пустая строка, проверяем уникальность
+        if new_username is not None and new_username.strip():
+            # Check if username is already taken by another user
+            result = await db.execute(select(User).where(User.username == new_username))
+            existing_user = result.scalars().first()
+            if existing_user and existing_user.id != current_user.id:
+                raise HTTPException(status_code=400, detail="Username already taken")
+            current_user.username = new_username
+        else:
+            # Если username None или пустая строка, устанавливаем None
+            current_user.username = None
     
     if "avatar" in update_data:
         # Если новый аватар - это URL (обратная совместимость)

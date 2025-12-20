@@ -15,6 +15,7 @@ from app.models.statistics import (  # noqa: F401
 	MinecraftJoinAddress, MinecraftVersionProtocol, MinecraftGeolocation,
 	MinecraftSettings
 )
+from app.models.resource_collection import ResourceGoal, ResourceProgress  # noqa: F401
 
 engine = create_async_engine(settings.SQLALCHEMY_DATABASE_URI, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
