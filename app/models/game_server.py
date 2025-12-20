@@ -41,3 +41,5 @@ class GameServer(Base):
 
 	game_type = relationship("GameType", back_populates="game_servers")
 	activities = relationship("Activity", back_populates="server", cascade="all, delete-orphan")
+	resource_goals = relationship("ResourceGoal", back_populates="server", cascade="all, delete-orphan")
+	resource_progress = relationship("ResourceProgress", back_populates="server", cascade="all, delete-orphan")
