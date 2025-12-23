@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from typing import List
 from uuid import UUID
@@ -316,29 +316,55 @@ async def get_server_top_players(
 			detail="Server not found in statistics"
 		)
 	
-	# Получаем топ игроков по времени игры
+	# Подзапрос для времени игры (фильтр по id сервера)
+	playtime_subq = (
+		select(
+			MinecraftSession.user_id,
+			func.sum(
+				func.coalesce(MinecraftSession.session_end, func.extract('epoch', func.now()) * 1000) -
+				MinecraftSession.session_start - func.coalesce(MinecraftSession.afk_time, 0)
+			).label("total_playtime")
+		)
+		.where(MinecraftSession.server_id == mc_server.id)
+		.group_by(MinecraftSession.user_id)
+		.subquery()
+	)
+
+	# Подзапрос для убийств (фильтр по uuid сервера)
+	kills_subq = (
+		select(
+			MinecraftKill.killer_uuid,
+			func.count(MinecraftKill.id).label("total_kills")
+		)
+		.where(MinecraftKill.server_uuid == mc_server.server_uuid)
+		.group_by(MinecraftKill.killer_uuid)
+		.subquery()
+	)
+
+	# Подзапрос для смертей (фильтр по uuid сервера)
+	deaths_subq = (
+		select(
+			MinecraftKill.victim_uuid,
+			func.count(MinecraftKill.id).label("total_deaths")
+		)
+		.where(MinecraftKill.server_uuid == mc_server.server_uuid)
+		.group_by(MinecraftKill.victim_uuid)
+		.subquery()
+	)
+
+	# Основной запрос
 	result = await db.execute(
 		select(
 			MinecraftUser.uuid,
 			MinecraftUser.name,
-			func.sum(
-				func.coalesce(MinecraftSession.session_end, func.extract('epoch', func.now()) * 1000) -
-				MinecraftSession.session_start - func.coalesce(MinecraftSession.afk_time, 0)
-			).label("playtime"),
-			func.count(MinecraftKill.id).filter(MinecraftKill.killer_uuid == MinecraftUser.uuid).label("kills"),
-			func.count(MinecraftKill.id).filter(MinecraftKill.victim_uuid == MinecraftUser.uuid).label("deaths")
+			func.coalesce(playtime_subq.c.total_playtime, 0).label("playtime"),
+			func.coalesce(kills_subq.c.total_kills, 0).label("kills"),
+			func.coalesce(deaths_subq.c.total_deaths, 0).label("deaths")
 		)
-		.join(MinecraftSession, MinecraftSession.user_id == MinecraftUser.id)
-		.outerjoin(MinecraftKill, or_(
-			MinecraftKill.killer_uuid == MinecraftUser.uuid,
-			MinecraftKill.victim_uuid == MinecraftUser.uuid
-		))
-		.where(MinecraftSession.server_id == mc_server.id)
-		.group_by(MinecraftUser.id, MinecraftUser.uuid, MinecraftUser.name)
-		.order_by(func.sum(
-			func.coalesce(MinecraftSession.session_end, func.extract('epoch', func.now()) * 1000) -
-			MinecraftSession.session_start - func.coalesce(MinecraftSession.afk_time, 0)
-		).desc())
+		.join(playtime_subq, MinecraftUser.id == playtime_subq.c.user_id)
+		.outerjoin(kills_subq, MinecraftUser.uuid == kills_subq.c.killer_uuid)
+		.outerjoin(deaths_subq, MinecraftUser.uuid == deaths_subq.c.victim_uuid)
+		.order_by(func.coalesce(playtime_subq.c.total_playtime, 0).desc())
 		.offset(offset)
 		.limit(limit)
 	)

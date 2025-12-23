@@ -87,7 +87,7 @@ async def get_server_progress(
 	progress_list = result.scalars().all()
 	
 	# Создаем словари для быстрого поиска
-	goals_dict = {goal.resource_type: goal for goal in goals}
+
 	progress_dict = {progress.resource_type: progress for progress in progress_list}
 	
 	# Формируем список ресурсов с детальной информацией
@@ -115,17 +115,18 @@ async def get_server_progress(
 		))
 	
 	# Добавляем ресурсы, по которым есть прогресс, но нет целей
-	for resource_type, progress in progress_dict.items():
-		if resource_type not in goals_dict:
-			resources.append(ResourceProgressDetail(
-				resource_type=resource_type,
-				current_amount=progress.current_amount,
-				target_amount=None,
-				goal_id=None,
-				is_active=None,
-				progress_percentage=None,
-				updated_at=progress.updated_at
-			))
+	# (этот блок удален, так как мы хотим показывать только ресурсы с целями)
+	# for resource_type, progress in progress_dict.items():
+	# 	if resource_type not in goals_dict:
+	# 		resources.append(ResourceProgressDetail(
+	# 			resource_type=resource_type,
+	# 			current_amount=progress.current_amount,
+	# 			target_amount=None,
+	# 			goal_id=None,
+	# 			is_active=None,
+	# 			progress_percentage=None,
+	# 			updated_at=progress.updated_at
+	# 		))
 	
 	return ResourceProgressResponse(
 		server_id=server.id,
