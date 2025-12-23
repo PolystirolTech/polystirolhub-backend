@@ -5,7 +5,7 @@ from typing import Tuple, Optional
 import logging
 
 from app.models.game_server import GameServer
-from app.models.resource_collection import ResourceProgress
+from app.models.resource_collection import ResourceProgress, ResourceGoal
 from app.models.statistics import MinecraftServer as MinecraftServerModel
 from app.schemas.resource_collection import ResourceCollectionRequest
 
@@ -57,6 +57,23 @@ async def process_resource_collection(
 		if not game_server:
 			return False, 0, f"Server with UUID {request.server_uuid} not found"
 		
+		# Проверяем наличие активной цели для этого ресурса
+		result = await db.execute(
+			select(ResourceGoal).where(
+				and_(
+					ResourceGoal.server_id == game_server.id,
+					ResourceGoal.resource_type == request.resource_type,
+					ResourceGoal.is_active.is_(True)
+				)
+			)
+		)
+		goal = result.scalar_one_or_none()
+		
+		if not goal:
+			# Если нет активной цели, игнорируем обновление, но не возвращаем ошибку
+			# (мод может слать всё подряд)
+			return True, 0, None
+
 		# Получаем или создаем запись прогресса
 		result = await db.execute(
 			select(ResourceProgress).where(
