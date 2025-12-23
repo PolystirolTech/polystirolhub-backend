@@ -4,10 +4,11 @@
 from typing import Optional, Dict, Any
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, delete
 import logging
 
 from app.models.user import User
+from app.models.badge import UserBadge
 from app.services.badge_progress import extend_or_award_badge
 from app.services.user_counters import get_counter
 
@@ -77,13 +78,30 @@ class XPLeaderHandler(BaseConditionHandler):
 		logger.info(f"XP leader found: user_id={leader.id}, username={leader.username}, xp={leader.xp}")
 		
 		try:
+			# 1. Снимаем бейдж со всех, кто не лидер
+			badges_to_revoke = await db.execute(
+				select(UserBadge).where(
+					UserBadge.badge_id == badge_id,
+					UserBadge.user_id != leader.id
+				)
+			)
+			badges = badges_to_revoke.scalars().all()
+			
+			for user_badge in badges:
+				await db.delete(user_badge)
+				logger.info(f"Revoked XP leader badge {badge_id} from user {user_badge.user_id}")
+			
+			# 2. Выдаем или продлеваем бейдж лидеру
 			user_badge = await extend_or_award_badge(leader.id, badge_id, db)
 			if user_badge:
 				logger.info(f"Badge {badge_id} awarded/extended to leader {leader.id}. Expires at: {user_badge.expires_at}")
 			else:
 				logger.warning(f"Failed to award badge {badge_id} to leader {leader.id}")
+				
+			await db.commit()
 		except Exception as e:
-			logger.error(f"Error awarding badge {badge_id} to XP leader {leader.id}: {e}", exc_info=True)
+			logger.error(f"Error processing XP leader badge {badge_id}: {e}", exc_info=True)
+			await db.rollback()
 	
 	async def calculate_progress(
 		self,
