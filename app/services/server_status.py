@@ -3,8 +3,10 @@ from uuid import UUID
 import json
 import base64
 import logging
+import asyncio
 from mcstatus import JavaServer
 from mcstatus.responses import JavaStatusResponse
+import a2s
 from app.db.redis import get_cache, set_cache, acquire_lock, release_lock
 from app.models.game_server import ServerStatus
 
@@ -14,8 +16,9 @@ logger = logging.getLogger(__name__)
 CACHE_TTL = 60  # 1 минута
 LOCK_TIMEOUT = 10  # 10 секунд
 DEFAULT_MINECRAFT_PORT = 25565
+DEFAULT_SOURCE_PORT = 27015
 
-async def get_server_status(server_id: UUID, ip: str, port: Optional[int] = None, server_status: ServerStatus = ServerStatus.active) -> dict:
+async def get_server_status(server_id: UUID, ip: str, port: Optional[int] = None, server_status: ServerStatus = ServerStatus.active, game_type_name: str = "Minecraft") -> dict:
 	"""
 	Получение статуса сервера с кэшированием в Redis.
 	
@@ -76,7 +79,11 @@ async def get_server_status(server_id: UUID, ip: str, port: Optional[int] = None
 	if lock_acquired:
 		try:
 			# Запрашиваем статус у сервера
-			status_data = await _fetch_minecraft_status(ip, port)
+			# Определяем протокол по имени типа игры
+			if "minecraft" in game_type_name.lower():
+				status_data = await _fetch_minecraft_status(ip, port)
+			else:
+				status_data = await _fetch_gold_source_status(ip, port)
 			
 			# Сохраняем в кэш
 			await set_cache(cache_key, json.dumps(status_data), CACHE_TTL)
@@ -88,7 +95,6 @@ async def get_server_status(server_id: UUID, ip: str, port: Optional[int] = None
 	else:
 		# Блокировка не получена, значит другой процесс обновляет статус
 		# Ждем немного и проверяем кэш снова
-		import asyncio
 		await asyncio.sleep(0.5)
 		
 		cached_data = await get_cache(cache_key)
@@ -111,6 +117,54 @@ async def get_server_status(server_id: UUID, ip: str, port: Optional[int] = None
 			"error": "Server status is being updated, please try again"
 		}
 
+async def _fetch_gold_source_status(ip: str, port: Optional[int] = None) -> dict:
+	"""
+	Внутренняя функция для запроса статуса сервера Valve (GoldSrc/Source) через протокол A2S.
+	"""
+	try:
+		server_port = port if port is not None else DEFAULT_SOURCE_PORT
+		address = (ip, server_port)
+		
+		loop = asyncio.get_running_loop()
+		
+		# a2s.info
+		# timeout 3 секунды
+		info = await loop.run_in_executor(None, lambda: a2s.info(address, timeout=3.0))
+		
+		# a2s.players
+		try:
+			players = await loop.run_in_executor(None, lambda: a2s.players(address, timeout=3.0))
+			players_list = [p.name for p in players if p.name] # Фильтруем пустые имена
+		except Exception as e:
+			logger.warning(f"Failed to fetch A2S players for {ip}:{server_port}: {e}")
+			players_list = []
+			
+		return {
+			"server_icon": None, # A2S не отдает иконку
+			"motd": info.server_name, # Используем имя сервера как MOTD
+			"players_online": info.player_count,
+			"players_max": info.max_players,
+			"players_list": players_list,
+			"ping": int(info.ping * 1000), # ping в секундах, переводим в мс
+			"version": info.game, # Например "Counter-Strike"
+			"online": True,
+			"error": None
+		}
+		
+	except Exception as e:
+		logger.error(f"Failed to fetch A2S server status for {ip}:{port}: {e}")
+		return {
+			"server_icon": None,
+			"motd": None,
+			"players_online": 0,
+			"players_max": 0,
+			"players_list": None,
+			"ping": None,
+			"version": None,
+			"online": False,
+			"error": str(e)
+		}
+
 async def _fetch_minecraft_status(ip: str, port: Optional[int] = None) -> dict:
 	"""
 	Внутренняя функция для запроса статуса Minecraft сервера.
@@ -123,7 +177,7 @@ async def _fetch_minecraft_status(ip: str, port: Optional[int] = None) -> dict:
 		# Если порт стандартный, можно использовать lookup для проверки SRV записей
 		if port is None:
 			try:
-				server = JavaServer.lookup(ip)
+				server = await asyncio.to_thread(JavaServer.lookup, ip)
 			except Exception:
 				# Если lookup не сработал, используем стандартный порт
 				server = JavaServer(ip, DEFAULT_MINECRAFT_PORT)

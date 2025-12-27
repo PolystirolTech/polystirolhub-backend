@@ -57,7 +57,12 @@ class Settings(BaseSettings):
 	# S3 настройки (для будущего использования)
 	STORAGE_S3_BUCKET: str = ""
 	STORAGE_S3_REGION: str = "us-east-1"
+	STORAGE_S3_REGION: str = "us-east-1"
 	STORAGE_S3_BASE_URL: str = ""  # Опционально, кастомный URL
+	
+	# Files storage (CS 1.6 resources, etc)
+	STORAGE_FILES_LOCAL_PATH: str = "uploads/files"
+	STORAGE_FILES_BASE_URL: str = "/static/files"
 
 	# Debug
 	DEBUG: bool = True  # По умолчанию True для разработки
