@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, users, admin, game_servers, statistics, badges, quests, notifications, activity, resource_collection
+from app.api.v1.endpoints import auth, users, admin, game_servers, statistics, badges, quests, notifications, activity, resource_collection, files
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -12,3 +12,4 @@ api_router.include_router(quests.router, tags=["quests"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(activity.router, prefix="/activity", tags=["activity"])
 api_router.include_router(resource_collection.router, prefix="/resource-collection", tags=["resource-collection"])
+api_router.include_router(files.router, prefix="/files", tags=["files"])

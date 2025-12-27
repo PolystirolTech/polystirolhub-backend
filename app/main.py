@@ -98,6 +98,12 @@ if settings.STORAGE_BACKEND.lower() == "local":
 		resource_packs_path = Path(__file__).parent.parent / resource_packs_path
 	resource_packs_path.mkdir(parents=True, exist_ok=True)
 	
+	# Создаем директорию для просто файлов если не существует
+	files_path = Path(settings.STORAGE_FILES_LOCAL_PATH)
+	if not files_path.is_absolute():
+		files_path = Path(__file__).parent.parent / files_path
+	files_path.mkdir(parents=True, exist_ok=True)
+	
 	# Mount для статических файлов
 	app.mount("/static", StaticFiles(directory=str(uploads_path.parent)), name="static")
 
