@@ -18,3 +18,5 @@ mcstatus
 Pillow
 apscheduler
 aiofiles
+
+python-a2s

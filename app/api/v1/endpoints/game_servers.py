@@ -130,6 +130,7 @@ async def get_game_server_status(
 	"""Получение статуса игрового сервера (icon, motd, players, ping)"""
 	result = await db.execute(
 		select(GameServer)
+		.options(selectinload(GameServer.game_type))
 		.where(GameServer.id == server_id)
 	)
 	server = result.scalars().first()
@@ -147,8 +148,8 @@ async def get_game_server_status(
 			detail="Game server not found"
 		)
 	
-	# Получаем статус через сервис (с кэшированием), передаем статус сервера
-	status_data = await get_server_status(server.id, server.ip, server.port, server.status)
+	# Получаем статус через сервис (с кэшированием), передаем статус сервера и название типа игры
+	status_data = await get_server_status(server.id, server.ip, server.port, server.status, server.game_type.name)
 	
 	return ServerStatusResponse(**status_data)
 
