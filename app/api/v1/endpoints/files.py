@@ -74,3 +74,78 @@ async def upload_file(
         "filename": safe_filename,
         "url": url
     }
+
+@router.get("/", response_model=list[dict])
+async def list_files(
+    current_user: User = Depends(deps.get_current_admin),
+):
+    """
+    Список всех загруженных файлов.
+    """
+    upload_dir = Path(settings.STORAGE_FILES_LOCAL_PATH)
+    if not upload_dir.is_absolute():
+        upload_dir = Path(settings.STORAGE_LOCAL_PATH).parent.parent / upload_dir
+    
+    if not upload_dir.exists():
+        return []
+        
+    files = []
+    for entry in os.scandir(upload_dir):
+        if entry.is_file():
+            stat = entry.stat()
+            url = f"{settings.BACKEND_BASE_URL}{settings.STORAGE_FILES_BASE_URL}/{entry.name}"
+            files.append({
+                "filename": entry.name,
+                "url": url,
+                "size": stat.st_size,
+                "created_at": stat.st_ctime
+            })
+            
+    # Сортируем по дате создания (новые сверху)
+    files.sort(key=lambda x: x["created_at"], reverse=True)
+    return files
+
+@router.delete("/{filename}", response_model=dict)
+async def delete_file(
+    filename: str,
+    current_user: User = Depends(deps.get_current_admin),
+):
+    """
+    Удаление файла.
+    """
+    upload_dir = Path(settings.STORAGE_FILES_LOCAL_PATH)
+    if not upload_dir.is_absolute():
+        upload_dir = Path(settings.STORAGE_LOCAL_PATH).parent.parent / upload_dir
+        
+    file_path = upload_dir / filename
+    
+    # Проверка на выход за пределы директории (path traversal)
+    try:
+        file_path = file_path.resolve()
+        upload_dir = upload_dir.resolve()
+        if not str(file_path).startswith(str(upload_dir)):
+             raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid filename"
+            )
+    except Exception:
+         raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid filename"
+        )
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found"
+        )
+        
+    try:
+        os.remove(file_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not delete file: {str(e)}"
+        )
+        
+    return {"status": "success", "message": f"File {filename} deleted"}
