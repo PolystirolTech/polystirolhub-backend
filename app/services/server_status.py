@@ -122,8 +122,20 @@ async def _fetch_gold_source_status(ip: str, port: Optional[int] = None) -> dict
 	Внутренняя функция для запроса статуса сервера Valve (GoldSrc/Source) через протокол A2S.
 	"""
 	try:
+		# Обработка формата host:port в поле ip
+		server_host = ip
 		server_port = port if port is not None else DEFAULT_SOURCE_PORT
-		address = (ip, server_port)
+		
+		# Если ip содержит ':', и это не IPv6 (грубая проверка), пытаемся извлечь порт
+		if ":" in ip and not (ip.startswith("[") and ip.endswith("]")):
+			parts = ip.split(":")
+			if len(parts) == 2 and parts[1].isdigit():
+				server_host = parts[0]
+				# Если порт не передан явно (или равен дефолтному), используем порт из строки
+				if port is None:
+					server_port = int(parts[1])
+		
+		address = (server_host, server_port)
 		
 		loop = asyncio.get_running_loop()
 		
@@ -136,7 +148,7 @@ async def _fetch_gold_source_status(ip: str, port: Optional[int] = None) -> dict
 			players = await loop.run_in_executor(None, lambda: a2s.players(address, timeout=3.0))
 			players_list = [p.name for p in players if p.name] # Фильтруем пустые имена
 		except Exception as e:
-			logger.warning(f"Failed to fetch A2S players for {ip}:{server_port}: {e}")
+			logger.warning(f"Failed to fetch A2S players for {server_host}:{server_port}: {e}")
 			players_list = []
 			
 		return {
@@ -170,19 +182,40 @@ async def _fetch_minecraft_status(ip: str, port: Optional[int] = None) -> dict:
 	Внутренняя функция для запроса статуса Minecraft сервера.
 	"""
 	try:
-		# Определяем порт
+		# Обработка формата host:port в поле ip
+		server_host = ip
 		server_port = port if port is not None else DEFAULT_MINECRAFT_PORT
 		
+		# Если ip содержит ':', и это не IPv6 (грубая проверка), пытаемся извлечь порт
+		if ":" in ip and not (ip.startswith("[") and ip.endswith("]")):
+			parts = ip.split(":")
+			if len(parts) == 2 and parts[1].isdigit():
+				server_host = parts[0]
+				# Если порт не передан явно, используем порт из строки
+				if port is None:
+					server_port = int(parts[1])
+
 		# Создаем объект сервера
-		# Если порт стандартный, можно использовать lookup для проверки SRV записей
-		if port is None:
+		# Если порт стандартный (и не был изменен из строки IP), можно использовать lookup
+		# Но если мы изменили логику портов, лучше всегда использовать явный конструктор или логику ниже
+		
+		# Если порт был None и в строке IP его не было -> port=None -> DEFAULT
+		# Но мы уже выставили default выше. 
+		
+		# Логика mcstatus JavaServer:
+		# JavaServer.lookup(ip) -> делает SRV lookup.
+		# JavaServer(ip, port) -> прямое соединение.
+		
+		# Если мы вытащили порт из строки -> используем прямое соединение (JavaServer(host, port))
+		# Если не вытащили и port был None -> пробуем lookup
+		
+		if port is None and server_host == ip: # i.e. we didn't extract port
 			try:
-				server = await asyncio.to_thread(JavaServer.lookup, ip)
+				server = await asyncio.to_thread(JavaServer.lookup, server_host)
 			except Exception:
-				# Если lookup не сработал, используем стандартный порт
-				server = JavaServer(ip, DEFAULT_MINECRAFT_PORT)
+				server = JavaServer(server_host, DEFAULT_MINECRAFT_PORT)
 		else:
-			server = JavaServer(ip, server_port)
+			server = JavaServer(server_host, server_port)
 		
 		# Получаем статус (mcstatus поддерживает async через asyncio)
 		status: JavaStatusResponse = await server.async_status()
