@@ -73,6 +73,7 @@ async def update_progress(
 			# Если нет UserQuest для сегодня - пропускаем этот квест
 			if not user_quest:
 				continue
+		else:
 			# Для achievement квестов quest_date всегда NULL
 			user_quest_result = await db.execute(
 				select(UserQuest).where(
