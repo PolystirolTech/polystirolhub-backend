@@ -11,7 +11,11 @@ from app.schemas.quest import (
 	Quest,
 	UserQuestWithQuest
 )
-from app.services.quest_progress import initialize_daily_quests_for_user, initialize_achievement_quests_for_user
+from app.services.quest_progress import (
+	initialize_daily_quests_for_user,
+	initialize_achievement_quests_for_user,
+	sync_achievement_progress
+)
 from uuid import UUID
 import logging
 
@@ -64,6 +68,9 @@ async def get_my_quests(
 	
 	# Для achievement квестов автоматически инициализируем квесты если их нет
 	await initialize_achievement_quests_for_user(current_user.id, db)
+	
+	# Синхронизируем прогресс achievement квестов с счетчиками
+	await sync_achievement_progress(current_user.id, db)
 	
 	# Получаем все квесты пользователя
 	# Для daily - только сегодняшние, для achievement - все
