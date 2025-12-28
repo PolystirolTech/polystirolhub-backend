@@ -501,3 +501,53 @@ async def check_initial_quest_conditions(
 		except Exception as e:
 			logger.error(f"Error checking initial condition for quest {quest.id} ({quest.condition_key}): {e}", exc_info=True)
 
+
+async def sync_achievement_progress(
+	user_id: UUID,
+	db: AsyncSession
+) -> None:
+	"""
+	Синхронизирует прогресс achievement квестов с текущими значениями счетчиков.
+	
+	Args:
+		user_id: UUID пользователя
+		db: Асинхронная сессия базы данных
+	"""
+	# Получаем все активные achievement квесты пользователя
+	result = await db.execute(
+		select(UserQuest).join(Quest).where(
+			and_(
+				UserQuest.user_id == user_id,
+				Quest.quest_type == QuestType.achievement,
+				UserQuest.completed_at.is_(None)
+			)
+		).options(selectinload(UserQuest.quest))
+	)
+	user_quests = result.scalars().all()
+	
+	if not user_quests:
+		return
+
+	# Получаем все счетчики пользователя
+	from app.services.user_counters import get_all_counters
+	counters = await get_all_counters(user_id, db)
+	
+	changes_made = False
+	
+	for user_quest in user_quests:
+		condition_key = user_quest.quest.condition_key
+		
+		# Если для ключа есть счетчик
+		if condition_key in counters:
+			current_value = counters[condition_key]
+			
+			# Если прогресс отличается и счетчик больше (или просто отличается, но мы доверяем счетчику)
+			if user_quest.progress != current_value:
+				# Используем update_progress для корректной обработки (включая завершение)
+				await update_progress(condition_key, user_id, 0, db, absolute_value=current_value)
+				changes_made = True
+	
+	if changes_made:
+		logger.info(f"Synced achievement progress for user {user_id}")
+
+
