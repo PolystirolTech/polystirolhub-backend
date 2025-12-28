@@ -73,7 +73,6 @@ async def update_progress(
 			# Если нет UserQuest для сегодня - пропускаем этот квест
 			if not user_quest:
 				continue
-		else:
 			# Для achievement квестов quest_date всегда NULL
 			user_quest_result = await db.execute(
 				select(UserQuest).where(
@@ -84,7 +83,9 @@ async def update_progress(
 					)
 				)
 			)
-			user_quest = user_quest_result.scalar_one_or_none()
+			# Используем first() вместо scalar_one_or_none() так как могут быть дубликаты
+			# из-за того что UniqueConstraint пропускает NULL в quest_date
+			user_quest = user_quest_result.scalars().first()
 			
 			# Если нет UserQuest - создаем его при первом обновлении
 			if not user_quest:
@@ -243,7 +244,7 @@ async def check_quest_completion(
 			)
 		)
 	
-	user_quest = user_quest_result.scalar_one_or_none()
+	user_quest = user_quest_result.scalars().first()
 	
 	if not user_quest:
 		return False
