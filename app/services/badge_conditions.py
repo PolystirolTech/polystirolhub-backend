@@ -79,17 +79,32 @@ class XPLeaderHandler(BaseConditionHandler):
 		
 		try:
 			# 1. Снимаем бейдж со всех, кто не лидер
-			badges_to_revoke = await db.execute(
+			badges_to_revoke_result = await db.execute(
 				select(UserBadge).where(
 					UserBadge.badge_id == badge_id,
 					UserBadge.user_id != leader.id
 				)
 			)
-			badges = badges_to_revoke.scalars().all()
+			badges = badges_to_revoke_result.scalars().all()
 			
-			for user_badge in badges:
-				await db.delete(user_badge)
-				logger.info(f"Revoked XP leader badge {badge_id} from user {user_badge.user_id}")
+			if badges:
+				user_ids_to_revoke = [b.user_id for b in badges]
+				
+				# Сбрасываем выбранный бейдж у тех, у кого он сейчас выбран
+				from sqlalchemy import update
+				await db.execute(
+					update(User)
+					.where(
+						User.id.in_(user_ids_to_revoke),
+						User.selected_badge_id == badge_id
+					)
+					.values(selected_badge_id=None)
+				)
+				
+				# Удаляем сами бейджи
+				for user_badge in badges:
+					await db.delete(user_badge)
+					logger.info(f"Revoked XP leader badge {badge_id} from user {user_badge.user_id} and cleared selection")
 			
 			# 2. Выдаем или продлеваем бейдж лидеру
 			user_badge = await extend_or_award_badge(leader.id, badge_id, db)
