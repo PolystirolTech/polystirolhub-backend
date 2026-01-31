@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from app.api import deps
@@ -14,6 +14,7 @@ from app.models.goldsource_statistics import (
     GoldSourceKill,
     GoldSourceFPS
 )
+from app.models.user import User, OAuthAccount, ExternalLink
 from app.schemas.goldsource_statistics import (
 	GoldSourceStatisticsBatch,
 	BatchResponse,
@@ -22,6 +23,7 @@ from app.schemas.goldsource_statistics import (
     GoldSourceTopPlayer
 )
 from app.services.goldsource_statistics import process_goldsource_statistics_batch
+from app.core.steam import steamidalt_to_64
 import logging
 
 logger = logging.getLogger(__name__)
@@ -72,17 +74,35 @@ async def get_player_profile(
 	db: AsyncSession = Depends(deps.get_db)
 ):
 	"""Get player profile by SteamID"""
-	
+	steam_id_64 = steamidalt_to_64(steam_id)
+
+	# Join with User to get website nickname
 	result = await db.execute(
-		select(GoldSourceUser).where(GoldSourceUser.steam_id == steam_id)
+		select(
+            GoldSourceUser,
+            func.coalesce(User.username, GoldSourceUser.name).label("display_name")
+        )
+        .outerjoin(OAuthAccount, and_(
+            OAuthAccount.provider == "steam",
+            OAuthAccount.provider_account_id == GoldSourceUser.steam_id
+        ))
+        .outerjoin(ExternalLink, and_(
+            ExternalLink.platform == "STEAM",
+            ExternalLink.external_id == GoldSourceUser.steam_id
+        ))
+        .outerjoin(User, func.coalesce(OAuthAccount.user_id, ExternalLink.user_id) == User.id)
+        .where(GoldSourceUser.steam_id == steam_id_64)
 	)
-	user = result.scalar_one_or_none()
+	row = result.first()
 	
-	if not user:
+	if not row:
 		raise HTTPException(
 			status_code=status.HTTP_404_NOT_FOUND,
 			detail="Player not found"
 		)
+    
+	user = row.GoldSourceUser
+	display_name = row.display_name
 		
 	# Total playtime
 	result = await db.execute(
@@ -123,7 +143,7 @@ async def get_player_profile(
 	
 	return GoldSourcePlayerProfile(
 		steam_id=user.steam_id,
-		name=user.name,
+		name=display_name,
 		registered=int(user.registered), # Ensure int
 		total_playtime=int(total_playtime),
 		total_kills=total_kills,
@@ -256,10 +276,14 @@ async def get_server_top_players(
     )
     
     # Main query
+    # Join with User table to get website nick if available
+    # We join GoldSourceUser -> (OAuthAccount OR ExternalLink) -> User
+    
+    # Using coalesce to prefer User.username > GoldSourceUser.name
     result = await db.execute(
         select(
             GoldSourceUser.steam_id,
-            GoldSourceUser.name,
+            func.coalesce(User.username, GoldSourceUser.name).label("name"),
             func.coalesce(playtime_subq.c.total_playtime, 0).label("playtime"),
             func.coalesce(kills_subq.c.total_kills, 0).label("kills"),
             func.coalesce(deaths_subq.c.total_deaths, 0).label("deaths"),
@@ -268,6 +292,16 @@ async def get_server_top_players(
         .join(playtime_subq, GoldSourceUser.id == playtime_subq.c.user_id)
         .outerjoin(kills_subq, GoldSourceUser.id == kills_subq.c.killer_id)
         .outerjoin(deaths_subq, GoldSourceUser.id == deaths_subq.c.victim_id)
+        # Join with User through OAuthAccount or ExternalLink
+        .outerjoin(OAuthAccount, and_(
+            OAuthAccount.provider == "steam",
+            OAuthAccount.provider_account_id == GoldSourceUser.steam_id
+        ))
+        .outerjoin(ExternalLink, and_(
+            ExternalLink.platform == "STEAM",
+            ExternalLink.external_id == GoldSourceUser.steam_id
+        ))
+        .outerjoin(User, func.coalesce(OAuthAccount.user_id, ExternalLink.user_id) == User.id)
         .order_by(func.coalesce(playtime_subq.c.total_playtime, 0).desc())
         .offset(offset)
         .limit(limit)

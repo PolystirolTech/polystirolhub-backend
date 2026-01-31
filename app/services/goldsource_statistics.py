@@ -7,6 +7,8 @@ import logging
 
 from app.models.game_server import GameServer
 from app.models.user import ExternalLink, OAuthAccount
+from app.core.steam import steamidalt_to_64
+
 
 from app.models.goldsource_statistics import (
 	GoldSourceServer as GoldSourceServerModel,
@@ -65,12 +67,13 @@ async def get_or_create_goldsource_map(db: AsyncSession, map_name: str) -> int:
     return map_obj.id
 
 async def get_or_create_goldsource_user(db: AsyncSession, user_data: GoldSourceUserData) -> GoldSourceUser:
-    result = await db.execute(select(GoldSourceUser).where(GoldSourceUser.steam_id == user_data.steam_id))
+    steam_id_64 = steamidalt_to_64(user_data.steam_id)
+    result = await db.execute(select(GoldSourceUser).where(GoldSourceUser.steam_id == steam_id_64))
     user = result.scalar_one_or_none()
     
     if not user:
         user = GoldSourceUser(
-            steam_id=user_data.steam_id,
+            steam_id=steam_id_64,
             registered=user_data.registered,
             name=user_data.name
         )
@@ -106,12 +109,15 @@ async def get_or_create_goldsource_server(db: AsyncSession, server_data: GoldSou
     return gs_server
 
 async def link_steam_to_user(db: AsyncSession, steam_id: str) -> Optional[str]:
+	# Convert to SteamID64 for lookup
+	steam_id_64 = steamidalt_to_64(steam_id)
+	
 	# 1. Check ExternalLink for STEAM platform (manual links)
 	result = await db.execute(
 		select(ExternalLink).where(
 			and_(
 				ExternalLink.platform == "STEAM",
-				ExternalLink.external_id == steam_id
+				ExternalLink.external_id == steam_id_64
 			)
 		)
 	)
@@ -125,7 +131,7 @@ async def link_steam_to_user(db: AsyncSession, steam_id: str) -> Optional[str]:
 		select(OAuthAccount).where(
 			and_(
 				OAuthAccount.provider == "steam",
-				OAuthAccount.provider_account_id == steam_id
+				OAuthAccount.provider_account_id == steam_id_64
 			)
 		)
 	)
@@ -186,7 +192,7 @@ async def process_goldsource_statistics_batch(
             for user_data in batch.users:
                 try:
                     user = await get_or_create_goldsource_user(db, user_data)
-                    user_id_map[user_data.steam_id] = user.id
+                    user_id_map[user_data.steam_id] = user.id # Keep original steam_id as key for mapping
                     processed["users"] += 1
                     
                     # Update UserInfo
