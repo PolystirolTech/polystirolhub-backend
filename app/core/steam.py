@@ -1,5 +1,4 @@
 import re
-from typing import Optional
 
 def steamidalt_to_64(steamid: str) -> str:
     """
