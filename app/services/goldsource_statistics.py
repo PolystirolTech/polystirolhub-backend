@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import logging
 
 from app.models.game_server import GameServer
-from app.models.user import ExternalLink
+from app.models.user import ExternalLink, OAuthAccount
 
 from app.models.goldsource_statistics import (
 	GoldSourceServer as GoldSourceServerModel,
@@ -106,7 +106,7 @@ async def get_or_create_goldsource_server(db: AsyncSession, server_data: GoldSou
     return gs_server
 
 async def link_steam_to_user(db: AsyncSession, steam_id: str) -> Optional[str]:
-    # Check ExternalLink for STEAM platform
+	# 1. Check ExternalLink for STEAM platform (manual links)
 	result = await db.execute(
 		select(ExternalLink).where(
 			and_(
@@ -119,6 +119,20 @@ async def link_steam_to_user(db: AsyncSession, steam_id: str) -> Optional[str]:
 	
 	if link:
 		return str(link.user_id)
+		
+	# 2. Check OAuthAccount for steam provider (logins)
+	result = await db.execute(
+		select(OAuthAccount).where(
+			and_(
+				OAuthAccount.provider == "steam",
+				OAuthAccount.provider_account_id == steam_id
+			)
+		)
+	)
+	oauth = result.scalar_one_or_none()
+	
+	if oauth:
+		return str(oauth.user_id)
 	
 	return None
 

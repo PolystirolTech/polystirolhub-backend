@@ -1085,7 +1085,30 @@ async def check_link_status(
 	)
 	external_links = result.scalars().all()
 	
+	# Get all OAuth accounts for this user (these are also links)
+	result = await db.execute(
+		select(OAuthAccount).where(OAuthAccount.user_id == user_id)
+	)
+	oauth_accounts = result.scalars().all()
+	
+	# Prepare the response list
+	links = []
+	
+	# Add external links
+	for link in external_links:
+		links.append(ExternalLinkResponse.model_validate(link))
+		
+	# Add OAuth accounts as links
+	for acc in oauth_accounts:
+		links.append(ExternalLinkResponse(
+			id=acc.id,
+			platform=acc.provider.upper(), # Standardize to uppercase for platform names
+			external_id=acc.provider_account_id,
+			platform_username=acc.provider_username,
+			created_at=acc.created_at
+		))
+	
 	return LinkStatusResponse(
 		user_id=user_id,
-		links=[ExternalLinkResponse.model_validate(link) for link in external_links]
+		links=links
 	)
