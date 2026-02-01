@@ -13,6 +13,7 @@ import logging
 from app.models.quest import Quest, UserQuest, QuestType
 from app.models.user import OAuthAccount, ExternalLink
 from app.models.statistics import MinecraftSession, MinecraftUser
+from app.models.goldsource_statistics import GoldSourceSession, GoldSourceUser
 from app.core.progression import award_xp
 from app.core.currency import add_currency
 from app.services.user_counters import get_counter
@@ -493,6 +494,82 @@ async def check_initial_quest_conditions(
 						if total_playtime_seconds > 0:
 							await update_progress("playtime_daily", user_id, 0, db, absolute_value=total_playtime_seconds)
 							logger.info(f"Checked playtime_daily for user {user_id}: {total_playtime_seconds} seconds")
+				
+				# Проверяем время игры в GoldSource
+				
+				# Ищем Steam ID пользователя
+				# Ищем Steam ID пользователя
+				steam_id_64 = None
+				
+				# 1. Через ExternalLink (STEAM)
+				ext_link_result = await db.execute(
+					select(ExternalLink).where(
+						and_(
+							ExternalLink.user_id == user_id,
+							ExternalLink.platform == "STEAM"
+						)
+					)
+				)
+				ext_link = ext_link_result.scalar_one_or_none()
+				if ext_link:
+					steam_id_64 = ext_link.external_id
+				
+				# 2. Через OAuthAccount (steam)
+				if not steam_id_64:
+					oauth_result = await db.execute(
+						select(OAuthAccount).where(
+							and_(
+								OAuthAccount.user_id == user_id,
+								OAuthAccount.provider == "steam"
+							)
+						)
+					)
+					oauth = oauth_result.scalar_one_or_none()
+					if oauth:
+						steam_id_64 = oauth.provider_account_id
+				
+				if steam_id_64:
+					# Получаем GoldSourceUser по SteamID64
+					gs_user_result = await db.execute(
+						select(GoldSourceUser).where(GoldSourceUser.steam_id == steam_id_64)
+					)
+					gs_user = gs_user_result.scalar_one_or_none()
+					
+					if gs_user:
+						# Вычисляем playtime за сегодня
+						today = date.today()
+						today_start = int(datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc).timestamp() * 1000)
+						today_end = int(datetime.combine(today, datetime.max.time()).replace(tzinfo=timezone.utc).timestamp() * 1000)
+						
+						# Суммируем playtime за сегодня (kills, deaths, headshots - не важны здесь, только время)
+						playtime_result = await db.execute(
+							select(func.sum(
+								func.coalesce(GoldSourceSession.session_end, func.extract('epoch', func.now()) * 1000) -
+								GoldSourceSession.session_start
+							)).where(
+								and_(
+									GoldSourceSession.user_id == gs_user.id,
+									GoldSourceSession.session_start >= today_start,
+									GoldSourceSession.session_start <= today_end
+								)
+							)
+						)
+						gs_playtime_ms = playtime_result.scalar_one() or 0
+						gs_playtime_seconds = max(0, int(gs_playtime_ms // 1000))
+						
+						if gs_playtime_seconds > 0:
+							# Если уже было время из Minecraft, суммируем (точнее update_progress с absolute_value=max)
+							# Но в игре счетчик playtime_daily ОДИН на все сервера.
+							# Подсчитаем общее время
+							total_seconds = gs_playtime_seconds
+							
+							# Проверяем не было ли уже MC playtime (мы его уже посчитали выше если он был)
+							# Но total_playtime_seconds локальная переменная.
+							if 'total_playtime_seconds' in locals() and total_playtime_seconds > 0:
+								total_seconds += total_playtime_seconds
+								
+							await update_progress("playtime_daily", user_id, 0, db, absolute_value=total_seconds)
+							logger.info(f"Checked GoldSource playtime_daily for user {user_id}: {gs_playtime_seconds} seconds (total: {total_seconds})")
 			
 			# Для других условий (server_join, deaths_in_session, blocks_traveled, messages_sent)
 			# проверка не нужна при инициализации, т.к. они событийные
