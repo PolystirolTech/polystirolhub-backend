@@ -80,8 +80,8 @@ async def get_or_create_goldsource_user(db: AsyncSession, user_data: GoldSourceU
         db.add(user)
         await db.flush()
     else:
-        # Update name if changed? Maybe better to keep latest?
-        if user.name != user_data.name:
+        # Update name if changed, but NEVER overwrite with "Unknown"
+        if user_data.name and user_data.name != "Unknown" and user.name != user_data.name:
             user.name = user_data.name
             
     return user
