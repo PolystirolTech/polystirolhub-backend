@@ -281,6 +281,51 @@ async def process_goldsource_statistics_batch(
                     errors.append(f"Error processing session: {e}")
                     logger.error(f"Error processing session: {e}")
 
+        # Update playtime_daily quest progress
+        if batch.sessions:
+            try:
+                from datetime import datetime, timezone, date as date_type
+                from app.services.quest_progress import update_progress as update_quest_progress
+                
+                today = date_type.today()
+                today_start = int(datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc).timestamp() * 1000)
+                today_end = int(datetime.combine(today, datetime.max.time()).replace(tzinfo=timezone.utc).timestamp() * 1000)
+                
+                # Group sessions by real user id and sum playtime
+                user_playtime_map = {} # real_user_id -> total_playtime_seconds
+                
+                for session_data in batch.sessions:
+                    try:
+                        real_user_id = await link_steam_to_user(db, session_data.steam_id)
+                        if not real_user_id:
+                            continue
+                            
+                        # Only today's sessions
+                        if session_data.session_start < today_start or session_data.session_start > today_end:
+                            continue
+                            
+                        session_end = session_data.session_end or int(datetime.now(timezone.utc).timestamp() * 1000)
+                        playtime_ms = session_end - session_data.session_start
+                        playtime_seconds = max(0, playtime_ms // 1000)
+                        
+                        if real_user_id not in user_playtime_map:
+                            user_playtime_map[real_user_id] = 0
+                        user_playtime_map[real_user_id] += playtime_seconds
+                    except Exception as e:
+                        logger.error(f"Error calculating GS playtime for session: {e}")
+                        
+                # Update progress for each user
+                for real_user_id, total_playtime in user_playtime_map.items():
+                    try:
+                         # We use absolute_value because we sum everything for today
+                         # In statistics.py it uses absolute_value=total_playtime
+                         # This is correct because total_playtime is the SUM of all sessions today
+                         await update_quest_progress("playtime_daily", real_user_id, 0, db, absolute_value=total_playtime)
+                    except Exception as e:
+                         logger.error(f"Error updating GS playtime quest progress: {e}")
+            except Exception as e:
+                logger.error(f"Error in GS playtime batch update: {e}")
+
         # Process kills
         if batch.kills:
             for kill_data in batch.kills:
