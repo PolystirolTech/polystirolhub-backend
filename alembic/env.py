@@ -15,12 +15,17 @@ from app.models.game_server import GameType, GameServer  # noqa: E402, F401
 from app.models.badge import Badge, UserBadge, UserBadgeProgress  # noqa: E402, F401
 from app.models.quest import Quest, UserQuest  # noqa: E402, F401
 from app.models.notification import Notification  # noqa: E402, F401
+from app.models.activity import Activity  # noqa: E402, F401
 from app.models.statistics import (  # noqa: E402, F401
 	MinecraftServer, MinecraftUser, MinecraftUserInfo, MinecraftSession,
 	MinecraftNickname, MinecraftKill, MinecraftPing, MinecraftPlatform,
 	MinecraftPluginVersion, MinecraftTPS, MinecraftWorld, MinecraftWorldTime,
 	MinecraftJoinAddress, MinecraftVersionProtocol, MinecraftGeolocation,
 	MinecraftSettings
+)
+from app.models.goldsource_statistics import (  # noqa: E402, F401
+    GoldSourceServer, GoldSourceUser, GoldSourceUserInfo, GoldSourceSession,
+    GoldSourceKill, GoldSourceMap, GoldSourceFPS, GoldSourceMapTime
 )
 from app.models.resource_collection import ResourceGoal, ResourceProgress  # noqa: E402, F401
 
