@@ -71,6 +71,7 @@ async def receive_goldsource_statistics_batch(
 @router.get("/goldsource/players/{steam_id}", response_model=GoldSourcePlayerProfile)
 async def get_player_profile(
 	steam_id: str,
+	server_id: Optional[UUID] = Query(None),
 	db: AsyncSession = Depends(deps.get_db)
 ):
 	"""Get player profile by SteamID"""
@@ -105,27 +106,56 @@ async def get_player_profile(
 	display_name = row.display_name
 		
 	# Total playtime
-	result = await db.execute(
-		select(func.sum(
-			func.coalesce(GoldSourceSession.session_end, func.extract('epoch', func.now()) * 1000) -
-			GoldSourceSession.session_start
-		))
-		.where(GoldSourceSession.user_id == user.id)
-	)
+	playtime_query = select(func.sum(
+		func.coalesce(GoldSourceSession.session_end, func.extract('epoch', func.now()) * 1000) -
+		GoldSourceSession.session_start
+	)).where(GoldSourceSession.user_id == user.id)
+
+	if server_id:
+		gs_server_result = await db.execute(
+			select(GoldSourceServerModel.id).where(GoldSourceServerModel.game_server_id == server_id)
+		)
+		internal_server_id = gs_server_result.scalar_one_or_none()
+		if internal_server_id:
+			playtime_query = playtime_query.where(GoldSourceSession.server_id == internal_server_id)
+		else:
+			return GoldSourcePlayerProfile(
+				steam_id=user.steam_id,
+				name=display_name,
+				registered=int(user.registered),
+				total_playtime=0,
+				total_kills=0,
+				total_deaths=0,
+				total_headshots=0,
+				servers_played=[]
+			)
+
+	result = await db.execute(playtime_query)
 	total_playtime = result.scalar_one() or 0
 	
 	# Kills/Deaths/Headshots
-	result = await db.execute(
-		select(
-			func.count(GoldSourceKill.id).filter(GoldSourceKill.killer_id == user.id).label("kills"),
-			func.count(GoldSourceKill.id).filter(GoldSourceKill.victim_id == user.id).label("deaths"),
-            func.count(GoldSourceKill.id).filter(and_(GoldSourceKill.killer_id == user.id, GoldSourceKill.headshot.is_(True))).label("headshots")
+	kills_query = select(func.count(GoldSourceKill.id)).where(GoldSourceKill.killer_id == user.id)
+	deaths_query = select(func.count(GoldSourceKill.id)).where(GoldSourceKill.victim_id == user.id)
+	hs_query = select(func.count(GoldSourceKill.id)).where(and_(GoldSourceKill.killer_id == user.id, GoldSourceKill.headshot.is_(True)))
+
+	if server_id:
+		gs_server_result = await db.execute(
+			select(GoldSourceServerModel.id).where(GoldSourceServerModel.game_server_id == server_id)
 		)
-	)
-	stats = result.first()
-	total_kills = stats.kills or 0
-	total_deaths = stats.deaths or 0
-	total_headshots = stats.headshots or 0
+		internal_server_id = gs_server_result.scalar_one_or_none()
+		if internal_server_id:
+			kills_query = kills_query.where(GoldSourceKill.server_id == internal_server_id)
+			deaths_query = deaths_query.where(GoldSourceKill.server_id == internal_server_id)
+			hs_query = hs_query.where(GoldSourceKill.server_id == internal_server_id)
+
+	result = await db.execute(kills_query)
+	total_kills = result.scalar_one() or 0
+	
+	result = await db.execute(deaths_query)
+	total_deaths = result.scalar_one() or 0
+	
+	result = await db.execute(hs_query)
+	total_headshots = result.scalar_one() or 0
 	
 	# Servers played
 	result = await db.execute(
