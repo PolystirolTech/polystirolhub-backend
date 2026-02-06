@@ -128,6 +128,18 @@ async def get_current_user(
         raise credentials_exception
     return user
 
+
+async def verify_ingest_token(request: Request):
+	"""Validate ingest token sent by game servers via `X-Ingest-Token` header.
+	Raises 401 if header missing/invalid. Intended for public ingest endpoints."""
+	ingest_token = request.headers.get("X-Ingest-Token")
+	if not ingest_token or ingest_token != settings.INGEST_TOKEN:
+		raise HTTPException(
+			status_code=status.HTTP_401_UNAUTHORIZED,
+			detail="Invalid or missing ingest token"
+		)
+	return True
+
 async def get_current_admin(
 	current_user: User = Depends(get_current_user)
 ) -> User:

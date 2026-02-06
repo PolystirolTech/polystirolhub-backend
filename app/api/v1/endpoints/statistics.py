@@ -36,7 +36,7 @@ router = APIRouter()
 
 # ========== Эндпоинты для игровых серверов (отправка данных) ==========
 
-@router.post("/minecraft/batch", response_model=BatchResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/minecraft/batch", response_model=BatchResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(deps.verify_ingest_token)])
 async def receive_statistics_batch(
 	batch: MinecraftStatisticsBatch,
 	db: AsyncSession = Depends(deps.get_db)
@@ -504,4 +504,3 @@ async def get_player_kills(
 		)
 		for kill in kills
 	]
-

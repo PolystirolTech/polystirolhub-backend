@@ -32,7 +32,7 @@ router = APIRouter()
 
 # ========== Endpoints for game servers (ingestion) ==========
 
-@router.post("/goldsource/batch", response_model=BatchResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/goldsource/batch", response_model=BatchResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(deps.verify_ingest_token)])
 async def receive_goldsource_statistics_batch(
 	batch: GoldSourceStatisticsBatch,
 	db: AsyncSession = Depends(deps.get_db)

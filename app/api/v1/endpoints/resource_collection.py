@@ -27,7 +27,7 @@ router = APIRouter()
 
 # ========== Публичные эндпоинты ==========
 
-@router.post("/collect", response_model=ResourceCollectionResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/collect", response_model=ResourceCollectionResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(deps.verify_ingest_token)])
 async def collect_resources(
 	request: ResourceCollectionRequest,
 	db: AsyncSession = Depends(deps.get_db)
@@ -326,4 +326,3 @@ async def delete_resource_goal(
 	await db.commit()
 	
 	return None
-
