@@ -399,21 +399,30 @@ async def process_goldsource_statistics_batch(
         if batch.counters:
             for counter_data in batch.counters:
                 try:
-                     user_id = await link_steam_to_user(db, counter_data.steam_id)
-                     if not user_id:
-                         continue
-                     
-                     from app.services.user_counters import increment_counter
-                     from app.services.quest_progress import update_progress as update_quest_progress
-                     from app.services.badge_progress import update_progress as update_badge_progress
-                     
-                     for counter_key, increment_value in counter_data.counters.items():
-                         if increment_value and increment_value > 0:
-                             await increment_counter(user_id, counter_key, increment_value, db)
-                             await update_quest_progress(counter_key, user_id, increment_value, db)
-                             await update_badge_progress(counter_key, user_id, increment_value, db)
+                    user_id = await link_steam_to_user(db, counter_data.steam_id)
+                    if not user_id:
+                        continue
+                    
+                    from app.services.user_counters import increment_counter, get_counter
+                    from app.services.quest_progress import update_progress as update_quest_progress
+                    from app.services.badge_progress import update_progress as update_badge_progress
+                    
+                    for counter_key, raw_value in counter_data.counters.items():
+                        if raw_value is None:
+                            continue
+                        
+                        current_total = await get_counter(user_id, counter_key, db)
+                        if raw_value >= current_total:
+                            delta = raw_value - current_total  # абсолютное значение
+                        else:
+                            delta = raw_value  # инкремент
+                        
+                        if delta and delta > 0:
+                            await increment_counter(user_id, counter_key, delta, db)
+                            await update_quest_progress(counter_key, user_id, delta, db)
+                            await update_badge_progress(counter_key, user_id, delta, db)
 
-                     processed["counters"] += 1
+                    processed["counters"] += 1
                 except Exception as e:
                     errors.append(f"Error processing counters: {e}")
 
