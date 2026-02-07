@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from typing import Optional
 from uuid import UUID
 from datetime import date, datetime
-from app.models.game_server import ServerStatus
+from app.models.game_server import ServerStatus, WhitelistStatus
 
 # GameType схемы
 class GameTypeBase(BaseModel):
@@ -35,6 +35,7 @@ class GameServerBase(BaseModel):
 	status: ServerStatus = ServerStatus.active
 	season_start: Optional[date] = None
 	season_end: Optional[date] = None
+	is_whitelist: bool = False
 
 class GameServerCreate(GameServerBase):
 	pass
@@ -52,6 +53,7 @@ class GameServerUpdate(BaseModel):
 	status: Optional[ServerStatus] = None
 	season_start: Optional[date] = None
 	season_end: Optional[date] = None
+	is_whitelist: Optional[bool] = None
 
 class GameServerResponse(GameServerBase):
 	id: UUID
@@ -78,11 +80,54 @@ class GameServerPublic(BaseModel):
 	status: ServerStatus
 	season_start: Optional[date] = None
 	season_end: Optional[date] = None
+	is_whitelist: bool = False
 	created_at: datetime
 	updated_at: datetime
 
 	class Config:
 		from_attributes = True
+
+
+# Whitelist схемы
+class WhitelistApplyRequest(BaseModel):
+	nickname: str  # Обязателен для неавторизованных; для авторизованных можно подставить из профиля
+
+
+class WhitelistApplyResponse(BaseModel):
+	message: str
+	entry_id: UUID
+	status: WhitelistStatus
+
+
+class WhitelistEntryResponse(BaseModel):
+	id: UUID
+	server_id: UUID
+	user_id: Optional[UUID] = None
+	nickname: str
+	status: WhitelistStatus
+	created_at: datetime
+	reviewed_at: Optional[datetime] = None
+
+	class Config:
+		from_attributes = True
+
+
+class WhitelistAdminAddRequest(BaseModel):
+	server_id: UUID
+	nickname: str
+	user_id: Optional[UUID] = None  # Опционально: привязать к пользователю
+
+
+class WhitelistStatusResponse(BaseModel):
+	status: Optional[WhitelistStatus] = None  # None если нет заявки
+	entry_id: Optional[UUID] = None
+	created_at: Optional[datetime] = None
+	reviewed_at: Optional[datetime] = None
+	reject_reason: Optional[str] = None  # На будущее
+
+
+class WhitelistIngestResponse(BaseModel):
+	nicknames: list[str]  # Список одобренных ников для вайтлиста
 
 # Схема ответа статуса сервера
 class ServerStatusResponse(BaseModel):
