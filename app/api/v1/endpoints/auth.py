@@ -19,6 +19,8 @@ import logging
 import uuid
 from uuid import UUID
 from typing import Optional, Tuple, List
+from PIL import Image
+import io
 
 logger = logging.getLogger(__name__)
 
@@ -803,13 +805,40 @@ async def upload_background(
             detail=f"File too large. Maximum size is {MAX_FILE_SIZE / 1024 / 1024}MB"
         )
     
-    # Определяем расширение файла
-    content_type_to_ext = {
-        "image/jpeg": "jpg",
-        "image/png": "png",
-        "image/webp": "webp"
-    }
-    file_ext = content_type_to_ext.get(file.content_type, "jpg")
+    # Оптимизация изображения
+    try:
+        # Открываем изображение
+        image = Image.open(io.BytesIO(file_content))
+        
+        # Конвертируем в RGB (убираем прозрачность для уменьшения размера, так как это фон)
+        if image.mode in ("RGBA", "P"):
+            image = image.convert("RGB")
+            
+        # Ресайз если изображение слишком большое (макс ширина 1920px)
+        MAX_WIDTH = 1920
+        if image.width > MAX_WIDTH:
+            ratio = MAX_WIDTH / image.width
+            new_height = int(image.height * ratio)
+            image = image.resize((MAX_WIDTH, new_height), Image.Resampling.LANCZOS)
+        
+        # Сохраняем в буфер как WebP с качеством 80%
+        buffer = io.BytesIO()
+        image.save(buffer, format="WEBP", quality=80, optimize=True)
+        file_content = buffer.getvalue()
+        
+        # Принудительно используем webp
+        file_ext = "webp"
+        logger.info(f"Background optimized: {len(file_content) / 1024:.2f} KB")
+        
+    except Exception as e:
+        logger.warning(f"Image optimization failed: {e}")
+        # Если оптимизация не удалась, используем оригинальное расширение
+        content_type_to_ext = {
+            "image/jpeg": "jpg",
+            "image/png": "png",
+            "image/webp": "webp"
+        }
+        file_ext = content_type_to_ext.get(file.content_type, "jpg")
     
     # Генерируем уникальное имя файла
     file_id = str(uuid.uuid4())
