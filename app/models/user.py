@@ -12,6 +12,7 @@ class User(Base):
 	email = Column(String, unique=True, index=True, nullable=True)
 	username = Column(String, unique=True, index=True, nullable=True)
 	avatar = Column(String, nullable=True)
+	background = Column(String, nullable=True)
 	is_active = Column(Boolean, default=True)
 	is_admin = Column(Boolean, default=False, nullable=False)
 	is_super_admin = Column(Boolean, default=False, nullable=False)

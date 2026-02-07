@@ -5,7 +5,7 @@ from sqlalchemy import select, delete, and_
 from app.api import deps
 from app.core.config import settings
 from app.core.security import create_access_token, create_refresh_token
-from app.core.storage import get_storage
+from app.core.storage import get_storage, get_backgrounds_storage
 from app.models.user import User, OAuthAccount, ExternalLink
 from app.schemas.user import UserUpdate, OAuthAccountPublic
 from app.schemas.link import LinkCodeGenerateResponse, LinkRequest, LinkResponse, LinkStatusResponse, ExternalLinkResponse
@@ -686,6 +686,7 @@ async def get_current_user_info(current_user: User = Depends(deps.get_current_us
         "email": current_user.email,
         "username": current_user.username,
         "avatar": current_user.avatar,
+        "background": current_user.background,
         "is_active": current_user.is_active,
         "is_admin": current_user.is_admin,
         "is_super_admin": current_user.is_super_admin,
@@ -772,6 +773,79 @@ async def upload_avatar(
         "email": current_user.email,
         "username": current_user.username,
         "avatar": current_user.avatar,
+        "background": current_user.background,
+        "is_active": current_user.is_active,
+        "selected_badge_id": str(current_user.selected_badge_id) if current_user.selected_badge_id else None,
+        "created_at": current_user.created_at.isoformat()
+    }
+
+@router.post("/me/background")
+async def upload_background(
+    file: UploadFile = File(...),
+    current_user: User = Depends(deps.get_current_user),
+    db: AsyncSession = Depends(deps.get_db)
+):
+    """Upload background image for current user"""
+    # Валидация типа файла
+    allowed_content_types = ["image/jpeg", "image/png", "image/webp"]
+    if file.content_type not in allowed_content_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed types: {', '.join(allowed_content_types)}"
+        )
+    
+    # Валидация размера файла (20MB)
+    MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+    file_content = await file.read()
+    if len(file_content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size is {MAX_FILE_SIZE / 1024 / 1024}MB"
+        )
+    
+    # Определяем расширение файла
+    content_type_to_ext = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp"
+    }
+    file_ext = content_type_to_ext.get(file.content_type, "jpg")
+    
+    # Генерируем уникальное имя файла
+    file_id = str(uuid.uuid4())
+    file_name = f"{current_user.id}_{file_id}.{file_ext}"
+    file_path = file_name
+    
+    # Сохраняем файл через storage service
+    storage = get_backgrounds_storage()
+    background_url = await storage.save(file_content, file_path)
+    
+    # Удаляем старый фон если он существует и это локальный файл
+    if current_user.background:
+        old_background = current_user.background
+        # Проверяем, является ли старый фон локальным файлом
+        local_base_url = settings.STORAGE_BACKGROUNDS_BASE_URL
+        full_base_url = f"{settings.BACKEND_BASE_URL}{local_base_url}"
+        
+        if old_background.startswith(full_base_url) or old_background.startswith(local_base_url):
+            # Извлекаем путь из URL
+            old_path = old_background.replace(full_base_url, "").replace(local_base_url, "").lstrip("/")
+            try:
+                await storage.delete(old_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete old background {old_path}: {e}")
+    
+    # Обновляем фон в БД
+    current_user.background = background_url
+    await db.commit()
+    await db.refresh(current_user)
+    
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "username": current_user.username,
+        "avatar": current_user.avatar,
+        "background": current_user.background,
         "is_active": current_user.is_active,
         "selected_badge_id": str(current_user.selected_badge_id) if current_user.selected_badge_id else None,
         "created_at": current_user.created_at.isoformat()
@@ -833,6 +907,28 @@ async def update_current_user(
         
         current_user.avatar = new_avatar
     
+    if "background" in update_data:
+        # Если новый фон - это URL (обратная совместимость)
+        new_background = update_data["background"]
+        old_background = current_user.background
+        
+        # Удаляем старый локальный файл если он существует и это локальный файл
+        if old_background:
+            # Проверяем, является ли старый фон локальным файлом
+            local_base_url = settings.STORAGE_BACKGROUNDS_BASE_URL
+            full_base_url = f"{settings.BACKEND_BASE_URL}{local_base_url}"
+            
+            if old_background.startswith(full_base_url) or old_background.startswith(local_base_url):
+                # Извлекаем путь из URL
+                old_path = old_background.replace(full_base_url, "").replace(local_base_url, "").lstrip("/")
+                try:
+                    storage = get_backgrounds_storage()
+                    await storage.delete(old_path)
+                except Exception as e:
+                    logger.warning(f"Failed to delete old background {old_path}: {e}")
+        
+        current_user.background = new_background
+    
     if "is_active" in update_data:
         current_user.is_active = update_data["is_active"]
     
@@ -844,6 +940,7 @@ async def update_current_user(
         "email": current_user.email,
         "username": current_user.username,
         "avatar": current_user.avatar,
+        "background": current_user.background,
         "is_active": current_user.is_active,
         "selected_badge_id": str(current_user.selected_badge_id) if current_user.selected_badge_id else None,
         "created_at": current_user.created_at.isoformat()
