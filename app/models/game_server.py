@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Enum as SQLEnum
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -10,6 +10,12 @@ class ServerStatus(enum.Enum):
 	active = "active"  # Работает
 	disabled = "disabled"  # Выключен
 	maintenance = "maintenance"  # Обслуживание
+
+
+class WhitelistStatus(enum.Enum):
+	pending = "pending"
+	approved = "approved"
+	rejected = "rejected"
 
 class GameType(Base):
 	__tablename__ = "game_types"
@@ -36,10 +42,29 @@ class GameServer(Base):
 	status = Column(SQLEnum(ServerStatus, name="server_status"), nullable=False, default=ServerStatus.active, index=True)
 	season_start = Column(Date, nullable=True)  # Дата начала сезона
 	season_end = Column(Date, nullable=True)  # Дата конца сезона
+	is_whitelist = Column(Boolean, nullable=False, default=False)  # показывать ли кнопку вайтлиста на фронте
 	created_at = Column(DateTime(timezone=True), server_default=func.now())
 	updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 	game_type = relationship("GameType", back_populates="game_servers")
+	whitelist_entries = relationship("ServerWhitelistEntry", back_populates="server", cascade="all, delete-orphan")
 	activities = relationship("Activity", back_populates="server", cascade="all, delete-orphan")
 	resource_goals = relationship("ResourceGoal", back_populates="server", cascade="all, delete-orphan")
 	resource_progress = relationship("ResourceProgress", back_populates="server", cascade="all, delete-orphan")
+
+
+class ServerWhitelistEntry(Base):
+	__tablename__ = "server_whitelist_entries"
+
+	id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+	server_id = Column(UUID(as_uuid=True), ForeignKey("game_servers.id", ondelete="CASCADE"), nullable=False, index=True)
+	user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+	nickname = Column(String(255), nullable=False)  # Ник для вайтлиста (из формы или привязанного аккаунта)
+	status = Column(SQLEnum(WhitelistStatus, name="whitelist_status"), nullable=False, default=WhitelistStatus.pending, index=True)
+	created_at = Column(DateTime(timezone=True), server_default=func.now())
+	reviewed_at = Column(DateTime(timezone=True), nullable=True)
+	reviewed_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+	server = relationship("GameServer", back_populates="whitelist_entries")
+	user = relationship("User", foreign_keys=[user_id])
+	reviewed_by = relationship("User", foreign_keys=[reviewed_by_id])

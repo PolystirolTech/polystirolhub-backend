@@ -715,19 +715,33 @@ async def process_statistics_batch(
 						# Игрок не привязан к аккаунту - пропускаем
 						continue
 					
-					from app.services.user_counters import increment_counter
+					from app.services.user_counters import increment_counter, get_counter
 					from app.services.quest_progress import update_progress as update_quest_progress
 					from app.services.badge_progress import update_progress as update_badge_progress
 					
 					# Обновляем все счетчики из словаря (гибкая структура - любые ключи)
-					for counter_key, increment_value in counter_data.counters.items():
-						if increment_value and increment_value > 0:
+					for counter_key, raw_value in counter_data.counters.items():
+						if raw_value is None:
+							continue
+						
+						# Некоторые источники присылают абсолютные значения, другие - инкременты.
+						# Чтобы поддержать оба формата, вычисляем дельту относительно сохраненного счетчика.
+						current_total = await get_counter(user_id, counter_key, db)
+						
+						if raw_value >= current_total:
+							# Похоже на абсолютное значение: дельта = разница
+							delta = raw_value - current_total
+						else:
+							# Похоже на инкремент: используем как есть
+							delta = raw_value
+						
+						if delta and delta > 0:
 							# Обновляем счетчик в БД
-							await increment_counter(user_id, counter_key, increment_value, db)
+							await increment_counter(user_id, counter_key, delta, db)
 							# Обновляем прогресс квестов (если есть квесты с таким condition_key)
-							await update_quest_progress(counter_key, user_id, increment_value, db)
+							await update_quest_progress(counter_key, user_id, delta, db)
 							# Обновляем прогресс бейджей (если есть бейджи с таким condition_key)
-							await update_badge_progress(counter_key, user_id, increment_value, db)
+							await update_badge_progress(counter_key, user_id, delta, db)
 					
 					processed["counters"] = processed.get("counters", 0) + 1
 				except Exception as e:
@@ -744,4 +758,3 @@ async def process_statistics_batch(
 		errors.append(f"Fatal error processing batch: {e}")
 		logger.error(f"Fatal error processing statistics batch: {e}", exc_info=True)
 		return False, processed, errors
-

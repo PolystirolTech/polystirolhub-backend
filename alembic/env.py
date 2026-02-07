@@ -11,7 +11,7 @@ from app.db.base_class import Base  # noqa: E402
 from app.core.config import settings  # noqa: E402
 # Import models so they're registered in Base.metadata for autogenerate
 from app.models.user import User, OAuthAccount, ExternalLink, UserCounter  # noqa: E402, F401
-from app.models.game_server import GameType, GameServer  # noqa: E402, F401
+from app.models.game_server import GameType, GameServer, ServerWhitelistEntry  # noqa: E402, F401
 from app.models.badge import Badge, UserBadge, UserBadgeProgress  # noqa: E402, F401
 from app.models.quest import Quest, UserQuest  # noqa: E402, F401
 from app.models.notification import Notification  # noqa: E402, F401

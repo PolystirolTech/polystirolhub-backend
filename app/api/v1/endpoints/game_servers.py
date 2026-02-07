@@ -1,24 +1,30 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from typing import Optional
 from app.api import deps
 from app.models.user import User
-from app.models.game_server import GameType, GameServer, ServerStatus
+from app.models.game_server import GameType, GameServer, ServerStatus, ServerWhitelistEntry, WhitelistStatus
 from app.schemas.game_server import (
 	GameTypeCreate,
 	GameTypeUpdate,
 	GameTypeResponse,
 	GameServerResponse,
 	GameServerPublic,
-	ServerStatusResponse
+	ServerStatusResponse,
+	WhitelistApplyRequest,
+	WhitelistApplyResponse,
+	WhitelistEntryResponse,
+	WhitelistAdminAddRequest,
+	WhitelistIngestResponse,
+	WhitelistStatusResponse,
 )
 from app.services.server_status import get_server_status
 from app.core.storage import get_banners_storage
 from app.core.config import settings
 from uuid import UUID
-from datetime import date
+from datetime import date, datetime, timezone
 import logging
 import uuid
 import json
@@ -153,6 +159,112 @@ async def get_game_server_status(
 	
 	return ServerStatusResponse(**status_data)
 
+
+# ========== Вайтлист: публичная заявка ==========
+
+@router.post("/game-servers/{server_id}/whitelist/apply", response_model=WhitelistApplyResponse, status_code=status.HTTP_201_CREATED)
+async def apply_whitelist(
+	server_id: UUID,
+	body: WhitelistApplyRequest,
+	current_user: User = Depends(deps.get_current_user),
+	db: AsyncSession = Depends(deps.get_db),
+):
+	"""Подать заявку в вайтлист сервера. Только для авторизованных пользователей."""
+	result = await db.execute(
+		select(GameServer).where(GameServer.id == server_id)
+	)
+	server = result.scalar()
+	if not server:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game server not found")
+	if server.status == ServerStatus.disabled:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game server not found")
+	if not server.is_whitelist:
+		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This server does not use whitelist")
+	nickname = (body.nickname or "").strip()
+	if not nickname or len(nickname) > 255:
+		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="nickname is required and must be up to 255 characters")
+	# Один ник на сервер
+	existing = await db.execute(
+		select(ServerWhitelistEntry).where(
+			ServerWhitelistEntry.server_id == server_id,
+			ServerWhitelistEntry.nickname == nickname,
+		)
+	)
+	existing_entry = existing.scalar()
+	if existing_entry:
+		if existing_entry.status == WhitelistStatus.pending:
+			return WhitelistApplyResponse(message="Заявка уже подана и ожидает рассмотрения", entry_id=existing_entry.id, status=existing_entry.status)
+		if existing_entry.status == WhitelistStatus.approved:
+			raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This nickname is already on the whitelist")
+		# rejected — переоткрываем заявку
+		existing_entry.status = WhitelistStatus.pending
+		existing_entry.user_id = current_user.id
+		existing_entry.reviewed_at = None
+		existing_entry.reviewed_by_id = None
+		await db.commit()
+		await db.refresh(existing_entry)
+		return WhitelistApplyResponse(message="Заявка отправлена на рассмотрение", entry_id=existing_entry.id, status=existing_entry.status)
+	entry = ServerWhitelistEntry(
+		server_id=server_id,
+		user_id=current_user.id,
+		nickname=nickname,
+		status=WhitelistStatus.pending,
+	)
+	db.add(entry)
+	await db.commit()
+	await db.refresh(entry)
+	return WhitelistApplyResponse(message="Заявка отправлена на рассмотрение", entry_id=entry.id, status=entry.status)
+
+
+@router.get("/game-servers/{server_id}/whitelist/my-status", response_model=WhitelistStatusResponse)
+async def get_my_whitelist_status(
+	server_id: UUID,
+	current_user: User = Depends(deps.get_current_user),
+	db: AsyncSession = Depends(deps.get_db),
+):
+	"""Получить статус моей заявки в вайтлист на этом сервере."""
+	# Ищем заявку пользователя
+	result = await db.execute(
+		select(ServerWhitelistEntry).where(
+			ServerWhitelistEntry.server_id == server_id,
+			ServerWhitelistEntry.user_id == current_user.id
+		)
+	)
+	entry = result.scalar()
+	
+	if not entry:
+		# Если заявки по user_id нет, попробуем найти по нику из привязанного MC аккаунта (если есть)
+		# Это нужно, если админ добавил вручную по нику, но не привязал к user_id
+		# Или если заявка была подана анонимно (хотя сейчас мы требуем авторизацию для apply, но вдруг)
+		# Но пока реализуем только прямой поиск по user_id, так как apply теперь всегда пишет user_id
+		return WhitelistStatusResponse(status=None)
+	
+	return WhitelistStatusResponse(
+		status=entry.status,
+		entry_id=entry.id,
+		created_at=entry.created_at,
+		reviewed_at=entry.reviewed_at
+	)
+
+
+# ========== Вайтлист: ingest для модов (X-Ingest-Token) ==========
+
+@router.get("/game-servers/{server_id}/whitelist", response_model=WhitelistIngestResponse, dependencies=[Depends(deps.verify_ingest_token)])
+async def get_whitelist_ingest(
+	server_id: UUID,
+	db: AsyncSession = Depends(deps.get_db),
+):
+	"""Список одобренных ников вайтлиста для сервера. Только с заголовком X-Ingest-Token (для модов)."""
+	result = await db.execute(
+		select(ServerWhitelistEntry).where(
+			ServerWhitelistEntry.server_id == server_id,
+			ServerWhitelistEntry.status == WhitelistStatus.approved,
+		)
+	)
+	entries = result.scalars().all()
+	return WhitelistIngestResponse(nicknames=[e.nickname for e in entries])
+
+
 # ========== Админские эндпоинты для типов игр ==========
 
 @router.post("/admin/game-types", response_model=GameTypeResponse)
@@ -268,6 +380,7 @@ async def create_game_server(
 	server_status: Optional[str] = Form(None),
 	season_start: Optional[str] = Form(None),
 	season_end: Optional[str] = Form(None),
+	is_whitelist: bool = Form(False),
 	banner: UploadFile = File(None),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
@@ -370,7 +483,8 @@ async def create_game_server(
 		banner_url=banner_url,
 		status=server_status_enum,
 		season_start=parsed_season_start,
-		season_end=parsed_season_end
+		season_end=parsed_season_end,
+		is_whitelist=is_whitelist,
 	)
 	
 	db.add(new_server)
@@ -435,6 +549,7 @@ async def update_game_server(
 	server_status: Optional[str] = Form(None),
 	season_start: Optional[str] = Form(None),
 	season_end: Optional[str] = Form(None),
+	is_whitelist: Optional[bool] = Form(None),
 	banner: UploadFile = File(None),
 	current_user: User = Depends(deps.get_current_admin),
 	db: AsyncSession = Depends(deps.get_db)
@@ -522,6 +637,9 @@ async def update_game_server(
 				status_code=status.HTTP_400_BAD_REQUEST,
 				detail=str(e)
 			)
+	
+	if is_whitelist is not None:
+		server.is_whitelist = is_whitelist
 	
 	# Обрабатываем новый баннер если загружен
 	if banner:
@@ -644,3 +762,134 @@ async def delete_game_server(
 	await db.commit()
 	
 	return {"message": "Game server deleted successfully"}
+
+
+# ========== Админ: вайтлист ==========
+
+@router.get("/admin/whitelist/pending", response_model=list[WhitelistEntryResponse])
+async def admin_whitelist_pending(
+	current_user: User = Depends(deps.get_current_admin),
+	db: AsyncSession = Depends(deps.get_db),
+	server_id: Optional[UUID] = Query(None, description="Фильтр по серверу"),
+):
+	"""Список заявок в вайтлист со статусом pending. Опционально фильтр по server_id."""
+	q = (
+		select(ServerWhitelistEntry)
+		.where(ServerWhitelistEntry.status == WhitelistStatus.pending)
+		.order_by(ServerWhitelistEntry.created_at.desc())
+	)
+	if server_id is not None:
+		q = q.where(ServerWhitelistEntry.server_id == server_id)
+	result = await db.execute(q)
+	entries = result.scalars().all()
+	return entries
+
+
+@router.get("/admin/whitelist/approved", response_model=list[WhitelistEntryResponse])
+async def admin_whitelist_approved(
+	current_user: User = Depends(deps.get_current_admin),
+	db: AsyncSession = Depends(deps.get_db),
+	server_id: Optional[UUID] = Query(None, description="Фильтр по серверу"),
+):
+	"""Список одобренных записей вайтлиста (status=approved). Опционально фильтр по server_id."""
+	q = (
+		select(ServerWhitelistEntry)
+		.where(ServerWhitelistEntry.status == WhitelistStatus.approved)
+		.order_by(ServerWhitelistEntry.created_at.desc())
+	)
+	if server_id is not None:
+		q = q.where(ServerWhitelistEntry.server_id == server_id)
+	result = await db.execute(q)
+	entries = result.scalars().all()
+	return entries
+
+
+@router.post("/admin/whitelist/entries/{entry_id}/approve")
+async def admin_whitelist_approve(
+	entry_id: UUID,
+	current_user: User = Depends(deps.get_current_admin),
+	db: AsyncSession = Depends(deps.get_db),
+):
+	"""Принять заявку в вайтлист."""
+	result = await db.execute(select(ServerWhitelistEntry).where(ServerWhitelistEntry.id == entry_id))
+	entry = result.scalar()
+	if not entry:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Whitelist entry not found")
+	if entry.status != WhitelistStatus.pending:
+		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Entry is not pending")
+	entry.status = WhitelistStatus.approved
+	entry.reviewed_at = datetime.now(timezone.utc)
+	entry.reviewed_by_id = current_user.id
+	await db.commit()
+	return {"message": "Approved", "entry_id": str(entry_id)}
+
+
+@router.post("/admin/whitelist/entries/{entry_id}/reject")
+async def admin_whitelist_reject(
+	entry_id: UUID,
+	current_user: User = Depends(deps.get_current_admin),
+	db: AsyncSession = Depends(deps.get_db),
+):
+	"""Отклонить заявку в вайтлист."""
+	result = await db.execute(select(ServerWhitelistEntry).where(ServerWhitelistEntry.id == entry_id))
+	entry = result.scalar()
+	if not entry:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Whitelist entry not found")
+	# Можно отклонять и уже принятые (удаление из вайтлиста)
+	entry.status = WhitelistStatus.rejected
+	entry.reviewed_at = datetime.now(timezone.utc)
+	entry.reviewed_by_id = current_user.id
+	await db.commit()
+	return {"message": "Rejected", "entry_id": str(entry_id)}
+
+
+@router.delete("/admin/whitelist/entries/{entry_id}")
+async def admin_whitelist_delete(
+	entry_id: UUID,
+	current_user: User = Depends(deps.get_current_admin),
+	db: AsyncSession = Depends(deps.get_db),
+):
+	"""Удалить запись из вайтлиста (полное удаление)."""
+	result = await db.execute(select(ServerWhitelistEntry).where(ServerWhitelistEntry.id == entry_id))
+	entry = result.scalar()
+	if not entry:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Whitelist entry not found")
+	await db.delete(entry)
+	await db.commit()
+	return {"message": "Deleted", "entry_id": str(entry_id)}
+
+
+@router.post("/admin/whitelist/add", response_model=WhitelistEntryResponse, status_code=status.HTTP_201_CREATED)
+async def admin_whitelist_add(
+	body: WhitelistAdminAddRequest,
+	current_user: User = Depends(deps.get_current_admin),
+	db: AsyncSession = Depends(deps.get_db),
+):
+	"""Добавить пользователя/ник в вайтлист сервера без заявки (сразу approved)."""
+	result = await db.execute(select(GameServer).where(GameServer.id == body.server_id))
+	server = result.scalar()
+	if not server:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game server not found")
+	nickname = (body.nickname or "").strip()
+	if not nickname or len(nickname) > 255:
+		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="nickname is required and up to 255 characters")
+	existing = await db.execute(
+		select(ServerWhitelistEntry).where(
+			ServerWhitelistEntry.server_id == body.server_id,
+			ServerWhitelistEntry.nickname == nickname,
+		)
+	)
+	if existing.scalar():
+		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This nickname is already in whitelist or has a pending request")
+	entry = ServerWhitelistEntry(
+		server_id=body.server_id,
+		user_id=body.user_id,
+		nickname=nickname,
+		status=WhitelistStatus.approved,
+		reviewed_at=datetime.now(timezone.utc),
+		reviewed_by_id=current_user.id,
+	)
+	db.add(entry)
+	await db.commit()
+	await db.refresh(entry)
+	return entry

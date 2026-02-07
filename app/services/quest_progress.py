@@ -26,7 +26,8 @@ async def update_progress(
 	user_id: UUID,
 	increment: int,
 	db: AsyncSession,
-	absolute_value: Optional[int] = None
+	absolute_value: Optional[int] = None,
+	quest_type_filter: Optional[QuestType] = None,
 ) -> None:
 	"""
 	Обновляет прогресс по condition_key для всех активных квестов пользователя.
@@ -36,15 +37,20 @@ async def update_progress(
 		user_id: UUID пользователя
 		increment: Значение для увеличения прогресса (используется если absolute_value=None)
 		absolute_value: Абсолютное значение для установки прогресса (если указано, используется вместо increment)
+		quest_type_filter: Ограничение по типу квеста (daily/achievement). Если None, обновляются все типы
 		db: Асинхронная сессия базы данных
 	"""
+	conditions = [
+		Quest.condition_key == condition_key,
+		Quest.is_active,
+	]
+	if quest_type_filter:
+		conditions.append(Quest.quest_type == quest_type_filter)
+
 	# Находим все активные квесты с таким condition_key
 	result = await db.execute(
 		select(Quest).where(
-			and_(
-				Quest.condition_key == condition_key,
-				Quest.is_active
-			)
+			and_(*conditions)
 		)
 	)
 	quests = result.scalars().all()
@@ -576,7 +582,7 @@ async def check_initial_quest_conditions(
 			
 			# UPDATE: Для achievement квестов, основанных на счетчиках, нужно синхронизировать прогресс
 			elif quest.quest_type == QuestType.achievement:
-				await update_progress(quest.condition_key, user_id, 0, db)
+				await update_progress(quest.condition_key, user_id, 0, db, quest_type_filter=QuestType.achievement)
 
 		except Exception as e:
 			logger.error(f"Error checking initial condition for quest {quest.id} ({quest.condition_key}): {e}", exc_info=True)
@@ -624,10 +630,15 @@ async def sync_achievement_progress(
 			# Если прогресс отличается и счетчик больше (или просто отличается, но мы доверяем счетчику)
 			if user_quest.progress != current_value:
 				# Используем update_progress для корректной обработки (включая завершение)
-				await update_progress(condition_key, user_id, 0, db, absolute_value=current_value)
+				await update_progress(
+					condition_key,
+					user_id,
+					0,
+					db,
+					absolute_value=current_value,
+					quest_type_filter=QuestType.achievement
+				)
 				changes_made = True
 	
 	if changes_made:
 		logger.info(f"Synced achievement progress for user {user_id}")
-
-
