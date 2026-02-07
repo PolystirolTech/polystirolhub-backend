@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:15-alpine
+    platform: linux/amd64
     restart: unless-stopped
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -20,6 +21,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    platform: linux/amd64
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
