@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select, desc
+from sqlalchemy.orm import selectinload
 from app.api import deps
 from app.models.user import User, OAuthAccount, ExternalLink, UserCounter
 from app.models.quest import UserQuest
@@ -9,8 +10,11 @@ from app.models.badge import UserBadge, UserBadgeProgress
 from app.models.notification import Notification
 from app.models.activity import Activity
 from app.db.redis import delete_refresh_token, get_cache, set_cache, acquire_lock, release_lock
-from app.schemas.user import LeaderboardPlayer
+from app.schemas.user import LeaderboardPlayer, UserProfile, UserProfileHeader, LinkedAccountInfo, BadgePreview
 from app.core.progression import award_xp, get_progression_info
+from app.services.statistics import get_minecraft_player_stats
+from app.services.goldsource_statistics import get_goldsource_player_stats
+from uuid import UUID
 import json
 import asyncio
 import logging
@@ -297,3 +301,126 @@ async def get_leaderboard(
 			)
 			for player in players
 		]
+
+@router.get("/{user_identifier}/profile", response_model=UserProfile)
+async def get_user_profile(
+    user_identifier: str,
+    db: AsyncSession = Depends(deps.get_db)
+):
+    """Get comprehensive user profile by UUID or username"""
+    
+    # Try to parse as UUID, otherwise treat as username
+    try:
+        user_uuid = UUID(user_identifier)
+        query = select(User).options(selectinload(User.external_links)).where(User.id == user_uuid)
+    except ValueError:
+        query = select(User).options(selectinload(User.external_links)).where(User.username == user_identifier)
+
+    # 1. Get User
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # 2. Get Progression
+    progression = get_progression_info(user.xp)
+    
+    # 3. Get Linked Accounts
+    linked_accounts = []
+    minecraft_uuids = []
+    steam_ids = []
+    added_accounts = set()  # Set of (platform, external_id) to prevent duplicates
+    
+    for link in user.external_links:
+        linked_accounts.append(LinkedAccountInfo(
+            platform=link.platform,
+            nickname=link.platform_username or "Unknown",
+            external_id=link.external_id
+        ))
+        added_accounts.add((link.platform, link.external_id))
+        
+        if link.platform == "MC":
+            minecraft_uuids.append(link.external_id)
+        elif link.platform == "STEAM":
+            steam_ids.append(link.external_id)
+            
+    # Also check OAuth accounts
+    result = await db.execute(
+        select(OAuthAccount).where(OAuthAccount.user_id == user.id)
+    )
+    oauth_accounts = result.scalars().all()
+    
+    for oauth in oauth_accounts:
+        platform = oauth.provider.upper()
+        external_id = oauth.provider_account_id
+        
+        if (platform, external_id) not in added_accounts:
+            # If it's Steam, we want to fetch stats for it
+            if platform == "STEAM":
+                if external_id not in steam_ids:
+                    steam_ids.append(external_id)
+            
+            linked_accounts.append(LinkedAccountInfo(
+                platform=platform,
+                nickname=oauth.provider_username or "Unknown",
+                external_id=external_id
+            ))
+            added_accounts.add((platform, external_id))
+
+    # 4. Get Badges (last 5)
+    result = await db.execute(
+        select(UserBadge)
+        .options(selectinload(UserBadge.badge))
+        .where(UserBadge.user_id == user.id)
+        .order_by(UserBadge.received_at.desc())
+        .limit(5)
+    )
+    user_badges = result.scalars().all()
+    
+    badge_previews = [
+        BadgePreview(
+            id=ub.badge.id,
+            name=ub.badge.name,
+            image_url=ub.badge.image_url,
+            description=ub.badge.description,
+            received_at=ub.received_at
+        )
+        for ub in user_badges
+    ]
+    
+    # 5. Get Statistics
+    minecraft_stats = []
+    for uuid in minecraft_uuids:
+        stats = await get_minecraft_player_stats(db, uuid)
+        if stats:
+            minecraft_stats.append(stats)
+            
+    goldsource_stats = []
+    for steam_id in steam_ids:
+        stats = await get_goldsource_player_stats(db, steam_id)
+        if stats:
+            goldsource_stats.append(stats)
+            
+    # Assemble Header
+    header = UserProfileHeader(
+        id=user.id,
+        username=user.username,
+        avatar=user.avatar,
+        level=user.level,
+        xp=user.xp,
+        xp_progress=progression["xp_progress"],
+        xp_for_next_level=progression["xp_for_next_level"],
+        progress_percent=progression["progress_percent"],
+        linked_accounts=linked_accounts
+    )
+    
+    return UserProfile(
+        header=header,
+        badges=badge_previews,
+        minecraft_stats=minecraft_stats,
+        goldsource_stats=goldsource_stats
+    )

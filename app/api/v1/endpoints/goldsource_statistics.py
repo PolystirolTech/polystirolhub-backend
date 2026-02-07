@@ -22,8 +22,7 @@ from app.schemas.goldsource_statistics import (
     GoldSourceServerStats,
     GoldSourceTopPlayer
 )
-from app.services.goldsource_statistics import process_goldsource_statistics_batch
-from app.core.steam import steamidalt_to_64
+from app.services.goldsource_statistics import process_goldsource_statistics_batch, get_goldsource_player_stats
 import logging
 
 logger = logging.getLogger(__name__)
@@ -75,112 +74,15 @@ async def get_player_profile(
 	db: AsyncSession = Depends(deps.get_db)
 ):
 	"""Get player profile by SteamID"""
-	steam_id_64 = steamidalt_to_64(steam_id)
-
-	# Join with User to get website nickname
-	result = await db.execute(
-		select(
-            GoldSourceUser,
-            func.coalesce(User.username, GoldSourceUser.name).label("display_name")
-        )
-        .outerjoin(OAuthAccount, and_(
-            OAuthAccount.provider == "steam",
-            OAuthAccount.provider_account_id == GoldSourceUser.steam_id
-        ))
-        .outerjoin(ExternalLink, and_(
-            ExternalLink.platform == "STEAM",
-            ExternalLink.external_id == GoldSourceUser.steam_id
-        ))
-        .outerjoin(User, func.coalesce(OAuthAccount.user_id, ExternalLink.user_id) == User.id)
-        .where(GoldSourceUser.steam_id == steam_id_64)
-	)
-	row = result.first()
+	stats = await get_goldsource_player_stats(db, steam_id, server_id)
 	
-	if not row:
+	if not stats:
 		raise HTTPException(
 			status_code=status.HTTP_404_NOT_FOUND,
 			detail="Player not found"
 		)
-    
-	user = row.GoldSourceUser
-	display_name = row.display_name
-		
-	# Total playtime
-	playtime_query = select(func.sum(
-		func.coalesce(GoldSourceSession.session_end, func.extract('epoch', func.now()) * 1000) -
-		GoldSourceSession.session_start
-	)).where(GoldSourceSession.user_id == user.id)
-
-	if server_id:
-		gs_server_result = await db.execute(
-			select(GoldSourceServerModel.id).where(GoldSourceServerModel.game_server_id == server_id)
-		)
-		internal_server_id = gs_server_result.scalar_one_or_none()
-		if internal_server_id:
-			playtime_query = playtime_query.where(GoldSourceSession.server_id == internal_server_id)
-		else:
-			return GoldSourcePlayerProfile(
-				steam_id=user.steam_id,
-				name=display_name,
-				registered=int(user.registered),
-				total_playtime=0,
-				total_kills=0,
-				total_deaths=0,
-				total_headshots=0,
-				servers_played=[]
-			)
-
-	result = await db.execute(playtime_query)
-	total_playtime = result.scalar_one() or 0
 	
-	# Kills/Deaths/Headshots
-	kills_query = select(func.count(GoldSourceKill.id)).where(GoldSourceKill.killer_id == user.id)
-	deaths_query = select(func.count(GoldSourceKill.id)).where(GoldSourceKill.victim_id == user.id)
-	hs_query = select(func.count(GoldSourceKill.id)).where(and_(GoldSourceKill.killer_id == user.id, GoldSourceKill.headshot.is_(True)))
-
-	if server_id:
-		gs_server_result = await db.execute(
-			select(GoldSourceServerModel.id).where(GoldSourceServerModel.game_server_id == server_id)
-		)
-		internal_server_id = gs_server_result.scalar_one_or_none()
-		if internal_server_id:
-			kills_query = kills_query.where(GoldSourceKill.server_id == internal_server_id)
-			deaths_query = deaths_query.where(GoldSourceKill.server_id == internal_server_id)
-			hs_query = hs_query.where(GoldSourceKill.server_id == internal_server_id)
-
-	result = await db.execute(kills_query)
-	total_kills = result.scalar_one() or 0
-	
-	result = await db.execute(deaths_query)
-	total_deaths = result.scalar_one() or 0
-	
-	result = await db.execute(hs_query)
-	total_headshots = result.scalar_one() or 0
-	
-	# Servers played
-	result = await db.execute(
-		select(GoldSourceUserInfo.server_id)
-		.where(GoldSourceUserInfo.user_id == user.id)
-		.distinct()
-	)
-	server_ids = [row[0] for row in result.all()]
-	
-	result = await db.execute(
-		select(GoldSourceServerModel.server_uuid)
-		.where(GoldSourceServerModel.id.in_(server_ids))
-	)
-	servers_played = [row[0] for row in result.all()]
-	
-	return GoldSourcePlayerProfile(
-		steam_id=user.steam_id,
-		name=display_name,
-		registered=int(user.registered), # Ensure int
-		total_playtime=int(total_playtime),
-		total_kills=total_kills,
-		total_deaths=total_deaths,
-        total_headshots=total_headshots,
-		servers_played=servers_played
-	)
+	return stats
 
 @router.get("/goldsource/servers/{server_id}/stats", response_model=GoldSourceServerStats)
 async def get_server_stats(

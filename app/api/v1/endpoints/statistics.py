@@ -13,8 +13,6 @@ from app.models.statistics import (
 	MinecraftUserInfo,
 	MinecraftSession,
 	MinecraftKill,
-	MinecraftPlatform,
-	MinecraftNickname,
 	MinecraftTPS,
 )
 from app.schemas.statistics import (
@@ -26,7 +24,7 @@ from app.schemas.statistics import (
 	MinecraftServerStats,
 	MinecraftTopPlayer,
 )
-from app.services.statistics import process_statistics_batch
+from app.services.statistics import process_statistics_batch, get_minecraft_player_stats
 import logging
 
 logger = logging.getLogger(__name__)
@@ -86,134 +84,15 @@ async def get_player_profile(
 			detail="Invalid player UUID format"
 		)
 	
-	# Получаем игрока
-	result = await db.execute(
-		select(MinecraftUser).where(MinecraftUser.uuid == player_uuid)
-	)
-	user = result.scalar_one_or_none()
+	stats = await get_minecraft_player_stats(db, player_uuid, server_id)
 	
-	if not user:
+	if not stats:
 		raise HTTPException(
 			status_code=status.HTTP_404_NOT_FOUND,
 			detail="Player not found"
 		)
 	
-	# Получаем последний ник
-	result = await db.execute(
-		select(MinecraftNickname)
-		.where(MinecraftNickname.uuid == player_uuid)
-		.order_by(MinecraftNickname.last_used.desc())
-		.limit(1)
-	)
-	last_nickname = result.scalar_one_or_none()
-	
-	# Получаем платформу
-	result = await db.execute(
-		select(MinecraftPlatform).where(MinecraftPlatform.uuid == player_uuid)
-	)
-	platform = result.scalar_one_or_none()
-	
-	# Вычисляем общее время игры
-	playtime_query = select(func.sum(
-		func.coalesce(MinecraftSession.session_end, func.extract('epoch', func.now()) * 1000) -
-		MinecraftSession.session_start - func.coalesce(MinecraftSession.afk_time, 0)
-	)).where(MinecraftSession.user_id == user.id)
-
-	# Фильтруем по серверу если передан
-	if server_id:
-		# Нам нужен внутренний id сервера в таблице minecraft_servers
-		mc_server_result = await db.execute(
-			select(MinecraftServerModel.id).where(MinecraftServerModel.game_server_id == server_id)
-		)
-		internal_server_id = mc_server_result.scalar_one_or_none()
-		if internal_server_id:
-			playtime_query = playtime_query.where(MinecraftSession.server_id == internal_server_id)
-		else:
-			# Если сервер не найден в minecraft_servers, возвращаем 0
-			total_playtime = 0
-			total_kills = 0
-			total_deaths = 0
-			return MinecraftPlayerProfile(
-				uuid=user.uuid,
-				name=user.name,
-				registered=user.registered,
-				current_nickname=last_nickname.nickname if last_nickname else user.name,
-				platform=platform.platform if platform else None,
-				last_seen=None,
-				total_playtime=0,
-				total_kills=0,
-				total_deaths=0,
-				servers_played=[]
-			)
-
-	result = await db.execute(playtime_query)
-	total_playtime = result.scalar_one() or 0
-	
-	# Получаем количество убийств и смертей
-	kills_query = select(func.count(MinecraftKill.id)).where(MinecraftKill.killer_uuid == player_uuid)
-	deaths_query = select(func.count(MinecraftKill.id)).where(MinecraftKill.victim_uuid == player_uuid)
-
-	if server_id:
-		# Для убийств используем server_uuid
-		mc_server_result = await db.execute(
-			select(MinecraftServerModel.server_uuid).where(MinecraftServerModel.game_server_id == server_id)
-		)
-		server_uuid = mc_server_result.scalar_one_or_none()
-		if server_uuid:
-			kills_query = kills_query.where(MinecraftKill.server_uuid == server_uuid)
-			deaths_query = deaths_query.where(MinecraftKill.server_uuid == server_uuid)
-		else:
-			# Уже обработано выше, но для чистоты
-			pass
-
-	result = await db.execute(kills_query)
-	total_kills = result.scalar_one() or 0
-	
-	result = await db.execute(deaths_query)
-	total_deaths = result.scalar_one() or 0
-	
-	# Получаем список серверов
-	result = await db.execute(
-		select(MinecraftUserInfo.server_id)
-		.where(MinecraftUserInfo.user_id == user.id)
-		.distinct()
-	)
-	server_ids = [row[0] for row in result.all()]
-	
-	result = await db.execute(
-		select(MinecraftServerModel.server_uuid)
-		.where(MinecraftServerModel.id.in_(server_ids))
-	)
-	servers_played = [row[0] for row in result.all()]
-	
-	# Последний раз видели
-	last_seen = None
-	last_seen_query = select(func.max(MinecraftSession.session_end)).where(MinecraftSession.user_id == user.id)
-	
-	if server_id:
-		# Используем полученный ранее internal_server_id если он есть
-		mc_server_result = await db.execute(
-			select(MinecraftServerModel.id).where(MinecraftServerModel.game_server_id == server_id)
-		)
-		internal_server_id = mc_server_result.scalar_one_or_none()
-		if internal_server_id:
-			last_seen_query = last_seen_query.where(MinecraftSession.server_id == internal_server_id)
-
-	result = await db.execute(last_seen_query)
-	last_seen = result.scalar_one()
-	
-	return MinecraftPlayerProfile(
-		uuid=user.uuid,
-		name=user.name,
-		registered=user.registered,
-		current_nickname=last_nickname.nickname if last_nickname else user.name,
-		platform=platform.platform if platform else None,
-		last_seen=last_seen,
-		total_playtime=int(total_playtime),
-		total_kills=total_kills,
-		total_deaths=total_deaths,
-		servers_played=servers_played
-	)
+	return stats
 
 
 @router.get("/minecraft/servers/{server_id}/stats", response_model=MinecraftServerStats)
