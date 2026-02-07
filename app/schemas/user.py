@@ -9,6 +9,7 @@ class UserBase(BaseModel):
     email: Optional[EmailStr] = None
     username: Optional[str] = None
     avatar: Optional[str] = None
+    background: Optional[str] = None
     is_active: Optional[bool] = True
     is_admin: Optional[bool] = False
     is_super_admin: Optional[bool] = False
@@ -94,6 +95,7 @@ class UserProfileHeader(BaseModel):
     id: UUID
     username: Optional[str] = None
     avatar: Optional[str] = None
+    background: Optional[str] = None
     level: int
     xp: int
     xp_progress: int

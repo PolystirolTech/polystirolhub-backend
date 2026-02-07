@@ -48,6 +48,9 @@ class Settings(BaseSettings):
 	STORAGE_BACKEND: str = "local"  # "local" or "s3"
 	STORAGE_LOCAL_PATH: str = "uploads/avatars"  # Путь для локального хранения
 	STORAGE_AVATARS_BASE_URL: str = "/static/avatars"  # Базовый URL для доступа к аватарам (относительный путь)
+	# Backgrounds storage
+	STORAGE_BACKGROUNDS_LOCAL_PATH: str = "uploads/backgrounds"  # Путь для локального хранения фонов
+	STORAGE_BACKGROUNDS_BASE_URL: str = "/static/backgrounds"  # Базовый URL для доступа к фонам
 	# Banners storage
 	STORAGE_BANNERS_LOCAL_PATH: str = "uploads/banners"  # Путь для локального хранения баннеров
 	STORAGE_BANNERS_BASE_URL: str = "/static/banners"  # Базовый URL для доступа к баннерам

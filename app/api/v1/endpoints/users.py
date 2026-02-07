@@ -410,6 +410,7 @@ async def get_user_profile(
         id=user.id,
         username=user.username,
         avatar=user.avatar,
+        background=user.background,
         level=user.level,
         xp=user.xp,
         xp_progress=progression["xp_progress"],
