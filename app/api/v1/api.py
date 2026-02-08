@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, users, admin, game_servers, statistics, badges, quests, notifications, activity, resource_collection, files, goldsource_statistics
+from app.api.v1.endpoints import auth, users, admin, game_servers, statistics, badges, quests, notifications, activity, resource_collection, files, goldsource_statistics, shop
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -14,3 +14,4 @@ api_router.include_router(activity.router, prefix="/activity", tags=["activity"]
 api_router.include_router(resource_collection.router, prefix="/resource-collection", tags=["resource-collection"])
 api_router.include_router(files.router, prefix="/files", tags=["files"])
 api_router.include_router(goldsource_statistics.router, prefix="/statistics", tags=["goldsource-statistics"])
+api_router.include_router(shop.router, prefix="/shop", tags=["shop"])
