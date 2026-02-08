@@ -111,20 +111,21 @@ async def buy_item(db: AsyncSession, user_id: UUID, order_in: ShopOrderCreate) -
     # Try to find Steam ID
     # Check OAuth (e.g. if logged in via Steam)
     for oauth in user.oauth_accounts:
-        if oauth.provider == "steam":
+        if oauth.provider.lower() == "steam":
             steam_id = oauth.provider_account_id
             break
     # Check External Links (if linked manually)
     if not steam_id:
         for link in user.external_links:
-            if link.platform == "steam":
+            if link.platform.lower() == "steam":
                 steam_id = link.external_id
                 break
                 
     # Try to find Minecraft Name
     # Usually in ExternalLink with platform='minecraft'
     for link in user.external_links:
-        if link.platform == "minecraft":
+        # Check both "minecraft" and "mc" just in case, case-insensitive
+        if link.platform.lower() in ["minecraft", "mc"]:
             mc_name = link.platform_username # Assuming we store nickname here
             if not mc_name:
                  # Fallback if we only stored UUID in external_id, but usually we need name for commands
