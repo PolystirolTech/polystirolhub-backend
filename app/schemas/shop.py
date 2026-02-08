@@ -79,6 +79,7 @@ class PendingCommandResponse(BaseModel):
     order_id: UUID
     command: str
     username: str
+    target_username: Optional[str] = None # The specific game nickname (mc_name or steam_id) if available
     user_id: UUID
     created_at: datetime
 

@@ -75,6 +75,9 @@ class ShopOrder(Base):
     # Snapshot of the command at the time of purchase (optional, but good for history)
     command = Column(String, nullable=False)
     
+    # The actual nickname/ID used for the purchase (e.g. Sluicee1 or 76561198...)
+    target_username = Column(String, nullable=True)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     delivered_at = Column(DateTime(timezone=True), nullable=True)
     

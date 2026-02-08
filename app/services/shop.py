@@ -170,7 +170,8 @@ async def buy_item(db: AsyncSession, user_id: UUID, order_in: ShopOrderCreate) -
         game_server_id=server.id,
         price_paid=item.price,
         status="PENDING",
-        command=final_command
+        command=final_command,
+        target_username=mc_name or steam_id or user.username
     )
     
     db.add(order)
@@ -214,6 +215,7 @@ async def get_pending_commands(db: AsyncSession, server_id: UUID) -> List[Pendin
             order_id=order.id,
             command=order.command,
             username=order.user.username,
+            target_username=order.target_username,
             user_id=order.user.id,
             created_at=order.created_at
         ))
