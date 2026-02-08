@@ -37,7 +37,14 @@ async def get_all_items(db: AsyncSession) -> List[ShopItem]:
         selectinload(ShopItem.game_types)
     )
     result = await db.execute(query)
-    return result.scalars().all()
+    items = result.scalars().all()
+    
+    # Populate Pydantic compatible fields for M2M
+    for item in items:
+        item.game_server_ids = [s.id for s in item.game_servers]
+        item.game_type_ids = [t.id for t in item.game_types]
+        
+    return items
 
 async def get_items_for_server(db: AsyncSession, server_id: UUID) -> List[ShopItem]:
     """
@@ -59,12 +66,16 @@ async def get_items_for_server(db: AsyncSession, server_id: UUID) -> List[ShopIt
     
     available_items = []
     for item in all_items:
-        server_ids = [s.id for s in item.game_servers]
+        # Populate IDs for response
+        item.game_server_ids = [s.id for s in item.game_servers]
+        item.game_type_ids = [t.id for t in item.game_types]
+        
+        server_ids = item.game_server_ids
         if server_id in server_ids:
             available_items.append(item)
             continue
             
-        type_ids = [t.id for t in item.game_types]
+        type_ids = item.game_type_ids
         if server.game_type_id in type_ids:
             available_items.append(item)
             continue

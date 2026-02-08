@@ -47,9 +47,10 @@ class ShopItemResponse(ShopItemBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
-    # We return IDs to keep it simple, or full objects if needed. 
-    # For now, let's just assume the frontend might need to know availability.
-    # But usually, the frontend filters items *before* showing them.
+    
+    # Include availability info in response
+    game_type_ids: List[UUID] = []
+    game_server_ids: List[UUID] = []
     
     class Config:
         from_attributes = True
