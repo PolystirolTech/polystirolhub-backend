@@ -76,6 +76,8 @@ class MediaListCustomCreate(BaseModel):
 
 
 class MediaListUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=500)
+    cover_url: Optional[str] = None
     status: Optional[MediaStatus] = None
     rating: Optional[int] = Field(None, ge=1, le=10)
     comment: Optional[str] = None
@@ -98,6 +100,7 @@ class MediaListResponse(BaseModel):
     comment: Optional[str]
     is_favorite: bool
     is_public: bool
+    is_custom: bool
     started_at: Optional[date]
     completed_at: Optional[date]
     play_time_hours: Optional[float]

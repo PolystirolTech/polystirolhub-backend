@@ -8,25 +8,19 @@ from fastapi.responses import Response
 router = APIRouter()
 
 ALLOWED_HOSTS = {
-    # MAL
     "cdn.myanimelist.net",
     "api-cdn.myanimelist.net",
-    # Shikimori
     "shikimori.one",
     "shikimori.io",
     "dere.shikimori.one",
     "kawai.shikimori.one",
-    # TMDB
     "image.tmdb.org",
-    # IGDB
     "images.igdb.com",
-    # Last.fm
     "lastfm.freetls.fastly.net",
     "i.last.fm",
     "assets.last.fm",
 }
 
-# Simple in-process cache: url_hash -> (content_type, body)
 _cache: dict[str, tuple[str, bytes]] = {}
 _MAX_CACHE = 512
 
