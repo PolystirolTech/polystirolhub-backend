@@ -12,6 +12,7 @@ from app.models.media_list import MediaStatus, MediaType
 from app.models.user import User
 from app.schemas.media_list import (
     MediaListCreate,
+    MediaListCustomCreate,
     MediaListFilters,
     MediaListResponse,
     MediaListStats,
@@ -99,6 +100,21 @@ async def get_my_list(
     current_user: User = Depends(deps.get_current_user),
 ):
     return await svc.get_user_list(db, current_user.id, filters)
+
+
+@router.post("/custom", response_model=MediaListResponse, status_code=status.HTTP_201_CREATED)
+async def create_custom_entry(
+    data: MediaListCustomCreate,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Create a custom media list entry without external API lookup"""
+    try:
+        return await svc.create_custom_entry(db, current_user.id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="Entry with this title and type already exists")
 
 
 @router.get("/stats", response_model=MediaListStats)

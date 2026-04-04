@@ -43,6 +43,38 @@ class MediaListCreate(BaseModel):
         return v
 
 
+class MediaListCustomCreate(BaseModel):
+    media_type: MediaType
+    title: str = Field(..., min_length=1, max_length=500)
+    external_id: Optional[str] = Field(None, min_length=1, max_length=500)
+    cover_url: Optional[str] = None
+    description: Optional[str] = None
+    year: Optional[int] = Field(None, ge=1800, le=2200)
+    genres: Optional[list[str]] = None
+    status: Optional[MediaStatus] = None
+    rating: Optional[int] = Field(None, ge=1, le=10)
+    comment: Optional[str] = None
+    is_favorite: bool = False
+    is_public: bool = True
+    started_at: Optional[date] = None
+    completed_at: Optional[date] = None
+    play_time_hours: Optional[float] = Field(None, ge=0)
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v, info):
+        if info.data.get("media_type") == MediaType.album and v is not None:
+            raise ValueError("Albums cannot have a status")
+        return v
+
+    @field_validator("play_time_hours")
+    @classmethod
+    def validate_play_time(cls, v, info):
+        if v is not None and info.data.get("media_type") != MediaType.game:
+            raise ValueError("play_time_hours is only applicable to games")
+        return v
+
+
 class MediaListUpdate(BaseModel):
     status: Optional[MediaStatus] = None
     rating: Optional[int] = Field(None, ge=1, le=10)

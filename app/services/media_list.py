@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.media_list import MediaListEntry, MediaStatus, MediaType
-from app.schemas.media_list import MediaListCreate, MediaListFilters, MediaListStats, MediaListUpdate
+from app.schemas.media_list import MediaListCreate, MediaListCustomCreate, MediaListFilters, MediaListStats, MediaListUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,20 @@ async def create_entry(db: AsyncSession, user_id: UUID, data: MediaListCreate) -
     entry_data['cover_url'] = metadata.get('cover_url')
 
     entry = MediaListEntry(user_id=user_id, **entry_data)
+    db.add(entry)
+    try:
+        await db.commit()
+        await db.refresh(entry)
+        return entry
+    except IntegrityError:
+        await db.rollback()
+        raise
+
+
+async def create_custom_entry(
+    db: AsyncSession, user_id: UUID, data: MediaListCustomCreate
+) -> MediaListEntry:
+    entry = MediaListEntry(user_id=user_id, **data.model_dump())
     db.add(entry)
     try:
         await db.commit()
