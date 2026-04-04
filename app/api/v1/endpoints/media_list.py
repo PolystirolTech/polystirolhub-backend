@@ -14,6 +14,7 @@ from app.schemas.media_list import (
     MediaListCreate,
     MediaListFilters,
     MediaListResponse,
+    MediaListStats,
     MediaListUpdate,
     MediaSearchResult,
 )
@@ -28,6 +29,7 @@ def _filters_from_query(
     media_type: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     is_favorite: Optional[bool] = Query(None),
+    q: Optional[str] = Query(None, max_length=200),
     sort_by: str = Query("created_at", pattern="^(rating|completed_at|created_at|updated_at|title)$"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(50, ge=1, le=200),
@@ -51,6 +53,7 @@ def _filters_from_query(
         media_type=media_type_enum,
         status=status_enum,
         is_favorite=is_favorite,
+        q=q,
         sort_by=sort_by,
         order=order,
         limit=limit,
@@ -94,6 +97,22 @@ async def get_my_list(
     current_user: User = Depends(deps.get_current_user),
 ):
     return await svc.get_user_list(db, current_user.id, filters)
+
+
+@router.get("/stats", response_model=MediaListStats)
+async def get_stats(
+    media_type: Optional[str] = Query(None),
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Count entries by status for the current user (no pagination)"""
+    media_type_enum = None
+    if media_type:
+        try:
+            media_type_enum = MediaType(media_type)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid media_type: {media_type}")
+    return await svc.get_stats(db, current_user.id, media_type_enum)
 
 
 @router.get("/anime/export")

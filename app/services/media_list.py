@@ -2,12 +2,12 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import asc, desc, select
+from sqlalchemy import asc, desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.media_list import MediaListEntry
-from app.schemas.media_list import MediaListCreate, MediaListFilters, MediaListUpdate
+from app.models.media_list import MediaListEntry, MediaStatus, MediaType
+from app.schemas.media_list import MediaListCreate, MediaListFilters, MediaListStats, MediaListUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -105,10 +105,38 @@ async def get_user_list(
         query = query.where(MediaListEntry.status == filters.status)
     if filters.is_favorite is not None:
         query = query.where(MediaListEntry.is_favorite == filters.is_favorite)
+    if filters.q:
+        query = query.where(MediaListEntry.title.ilike(f"%{filters.q}%"))
 
     sort_col = _SORT_COLS.get(filters.sort_by, MediaListEntry.created_at)
-    query = query.order_by(_ORDER[filters.order](sort_col))
+    query = query.order_by(_ORDER[filters.order](sort_col).nulls_last())
     query = query.limit(filters.limit).offset(filters.offset)
 
     result = await db.execute(query)
     return list(result.scalars().all())
+
+
+async def get_stats(
+    db: AsyncSession,
+    user_id: UUID,
+    media_type: Optional[MediaType] = None,
+) -> MediaListStats:
+    query = (
+        select(MediaListEntry.status, func.count().label("cnt"))
+        .where(MediaListEntry.user_id == user_id)
+        .group_by(MediaListEntry.status)
+    )
+    if media_type is not None:
+        query = query.where(MediaListEntry.media_type == media_type)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    by_status = {s.value: 0 for s in MediaStatus}
+    total = 0
+    for status, cnt in rows:
+        total += cnt
+        if status is not None:
+            by_status[status.value] = cnt
+
+    return MediaListStats(total=total, by_status=by_status)

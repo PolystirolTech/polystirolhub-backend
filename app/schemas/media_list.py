@@ -94,7 +94,13 @@ class MediaListFilters(BaseModel):
     media_type: Optional[MediaType] = None
     status: Optional[MediaStatus] = None
     is_favorite: Optional[bool] = None
+    q: Optional[str] = Field(None, max_length=200)
     sort_by: str = Field("created_at", pattern="^(rating|completed_at|created_at|updated_at|title)$")
     order: str = Field("desc", pattern="^(asc|desc)$")
     limit: int = Field(50, ge=1, le=200)
     offset: int = Field(0, ge=0)
+
+
+class MediaListStats(BaseModel):
+    total: int
+    by_status: dict[str, int]
