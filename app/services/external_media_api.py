@@ -15,7 +15,10 @@ SEARCH_CACHE_TTL = settings.EXTERNAL_API_CACHE_TTL
 async def search_media(query: str, media_type: MediaType) -> list[dict]:
     """Search for media across external APIs"""
     if media_type == MediaType.anime:
-        return await _search_mal(query)
+        results = await _search_mal(query)
+        if not results:
+            results = await _search_shikimori(query)
+        return results
     elif media_type in (MediaType.movie, MediaType.series):
         return await _search_tmdb(query, is_series=(media_type == MediaType.series))
     elif media_type == MediaType.game:
@@ -39,7 +42,10 @@ async def get_metadata_by_external_id(external_id: str, media_type: MediaType) -
 
     # Cache miss — fetch from API
     if media_type == MediaType.anime:
-        return await _fetch_mal_by_id(external_id)
+        result = await _fetch_mal_by_id(external_id)
+        if not result:
+            result = await _fetch_shikimori_by_id(external_id)
+        return result
 
     return None
 
@@ -52,19 +58,22 @@ async def _fetch_mal_by_id(external_id: str) -> Optional[dict]:
     cache_key = f"media_by_id:{MediaType.anime.value}:{external_id}"
 
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
             response = await client.get(
                 f"https://api.myanimelist.net/v2/anime/{external_id}",
                 params={"fields": "id,title,main_picture,synopsis,genres,mean,start_season"},
                 headers={"X-MAL-CLIENT-ID": settings.MAL_CLIENT_ID},
-                timeout=10,
+                timeout=5,
             )
             if response.status_code != 200:
                 logger.warning(f"MAL fetch by ID {external_id} returned {response.status_code}")
                 return None
             anime = response.json()
+    except httpx.TimeoutException:
+        logger.warning(f"MAL fetch by ID {external_id} timed out, falling back to Shikimori")
+        return None
     except Exception as e:
-        logger.error(f"MAL fetch by ID {external_id} error: {e}")
+        logger.error(f"MAL fetch by ID {external_id} error: {e!r}")
         return None
 
     result = {
@@ -76,6 +85,174 @@ async def _fetch_mal_by_id(external_id: str) -> Optional[dict]:
         "source_rating": anime.get("mean"),
         "year": anime.get("start_season", {}).get("year"),
     }
+
+    import json
+    await set_cache(cache_key, json.dumps(result), SEARCH_CACHE_TTL)
+    return result
+
+
+_SHIKIMORI_GQL = "https://shikimori.one/api/graphql"
+_SHIKIMORI_HEADERS = {
+    "Content-Type": "application/json",
+    "User-Agent": "polystirolhub/1.0",
+}
+_SHIKIMORI_ANIME_FIELDS = """
+    id malId name russian
+    poster { originalUrl }
+    description score
+    genres { name }
+    airedOn { year }
+"""
+
+
+def _map_shikimori_anime(item: dict) -> dict:
+    poster = (item.get("poster") or {}).get("originalUrl")
+    genres = [g.get("name") for g in (item.get("genres") or []) if g.get("name")]
+    score_raw = item.get("score")
+    try:
+        source_rating = float(score_raw) if score_raw else None
+    except (ValueError, TypeError):
+        source_rating = None
+    return {
+        "title": item.get("name") or "",
+        "cover_url": poster,
+        "external_id": str(item.get("malId") or item.get("id")),
+        "description": item.get("description"),
+        "genres": genres,
+        "source_rating": source_rating,
+        "year": (item.get("airedOn") or {}).get("year"),
+    }
+
+
+async def _shikimori_graphql(query: str, variables: dict) -> Optional[dict]:
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            response = await client.post(
+                _SHIKIMORI_GQL,
+                json={"query": query, "variables": variables},
+                headers=_SHIKIMORI_HEADERS,
+                timeout=15,
+            )
+            if response.status_code != 200:
+                logger.warning(f"Shikimori GQL returned {response.status_code}")
+                return None
+            data = response.json()
+            if "errors" in data:
+                logger.warning(f"Shikimori GQL errors: {data['errors']}")
+                return None
+            return data.get("data")
+    except Exception as e:
+        logger.error(f"Shikimori GQL error: {e!r}")
+        return None
+
+
+async def _search_shikimori(query: str) -> list[dict]:
+    cache_key = f"media_search:anime:shiki:{hashlib.md5(query.encode()).hexdigest()}"
+
+    cached = await get_cache(cache_key)
+    if cached:
+        try:
+            import json
+            parsed = json.loads(cached)
+            if parsed:
+                return parsed
+        except Exception:
+            pass
+
+    gql = f"""
+    query($search: String!) {{
+        animes(search: $search, limit: 10, order: popularity) {{
+            {_SHIKIMORI_ANIME_FIELDS}
+        }}
+    }}
+    """
+    data = await _shikimori_graphql(gql, {"search": query})
+    if not data:
+        return []
+
+    results = [_map_shikimori_anime(a) for a in data.get("animes", [])]
+    results = [r for r in results if r.get("external_id")]
+
+    if results:
+        import json
+        await set_cache(cache_key, json.dumps(results), SEARCH_CACHE_TTL)
+        for r in results:
+            id_key = f"media_by_id:{MediaType.anime.value}:{r['external_id']}"
+            await set_cache(id_key, json.dumps(r), SEARCH_CACHE_TTL)
+
+    return results
+
+
+async def fetch_shikimori_batch(external_ids: list[str]) -> dict[str, dict]:
+    """Fetch multiple anime from Shikimori in batches of 50. Returns {external_id: metadata}"""
+    import json as _json
+
+    result: dict[str, dict] = {}
+    uncached: list[str] = []
+
+    # Check cache first
+    for eid in external_ids:
+        cached = await get_cache(f"media_by_id:{MediaType.anime.value}:{eid}")
+        if cached:
+            try:
+                result[eid] = _json.loads(cached)
+            except Exception:
+                uncached.append(eid)
+        else:
+            uncached.append(eid)
+
+    if not uncached:
+        return result
+
+    gql = f"""
+    query($ids: String!) {{
+        animes(ids: $ids, limit: 50) {{
+            {_SHIKIMORI_ANIME_FIELDS}
+        }}
+    }}
+    """
+
+    # Process in batches of 50
+    for i in range(0, len(uncached), 50):
+        batch = uncached[i:i + 50]
+        data = await _shikimori_graphql(gql, {"ids": ",".join(batch)})
+        if not data:
+            continue
+        for item in data.get("animes", []):
+            mapped = _map_shikimori_anime(item)
+            eid = mapped.get("external_id")
+            if eid:
+                result[eid] = mapped
+                await set_cache(
+                    f"media_by_id:{MediaType.anime.value}:{eid}",
+                    _json.dumps(mapped),
+                    SEARCH_CACHE_TTL,
+                )
+
+    return result
+
+
+async def _fetch_shikimori_by_id(external_id: str) -> Optional[dict]:
+    cache_key = f"media_by_id:{MediaType.anime.value}:{external_id}"
+
+    gql = f"""
+    query($ids: String!) {{
+        animes(ids: $ids, limit: 1) {{
+            {_SHIKIMORI_ANIME_FIELDS}
+        }}
+    }}
+    """
+    data = await _shikimori_graphql(gql, {"ids": external_id})
+    if not data:
+        return None
+
+    items = data.get("animes", [])
+    if not items:
+        return None
+
+    result = _map_shikimori_anime(items[0])
+    if not result.get("external_id"):
+        return None
 
     import json
     await set_cache(cache_key, json.dumps(result), SEARCH_CACHE_TTL)
@@ -258,7 +435,7 @@ async def _search_mal(query: str) -> list[dict]:
 
         try:
             logger.debug(f"Searching MAL for: {query}, Client-ID: {settings.MAL_CLIENT_ID[:10]}...")
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
                 response = await client.get(
                     "https://api.myanimelist.net/v2/anime",
                     params={
@@ -267,7 +444,7 @@ async def _search_mal(query: str) -> list[dict]:
                         "fields": "id,title,main_picture,synopsis,genres,mean,start_season"
                     },
                     headers={"X-MAL-CLIENT-ID": settings.MAL_CLIENT_ID},
-                    timeout=10,
+                    timeout=5,
                 )
                 if response.status_code != 200:
                     logger.error(f"MAL API returned {response.status_code}: {response.text[:500]}")

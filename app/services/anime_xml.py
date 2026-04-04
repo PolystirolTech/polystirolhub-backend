@@ -97,51 +97,49 @@ async def import_anime_xml(
     except ET.ParseError as e:
         raise ValueError(f"Invalid XML: {e}")
 
-    imported = 0
-    skipped = 0
-    errors = []
-
+    # Parse all entries from XML first
+    parsed = []
     for anime_el in root.findall("anime"):
-
-        def get_text(tag: str) -> str:
-            el = anime_el.find(tag)
-            return (el.text or "").strip() if el is not None else ""
+        def get_text(tag: str, el=anime_el) -> str:
+            child = el.find(tag)
+            return (child.text or "").strip() if child is not None else ""
 
         title = get_text("series_title")
         if not title:
-            skipped += 1
             continue
 
         external_id_raw = get_text("series_animedb_id")
         external_id = external_id_raw if external_id_raw and external_id_raw != "0" else None
+        parsed.append({
+            "title": title,
+            "external_id": external_id,
+            "status": MAL_TO_STATUS.get(get_text("my_status"), MediaStatus.planned),
+            "rating": (lambda s: int(s) if s.isdigit() and 1 <= int(s) <= 10 else None)(get_text("my_score")),
+            "started_at": _parse_date(get_text("my_start_date")),
+            "completed_at": _parse_date(get_text("my_finish_date")),
+            "comment": get_text("my_comments") or None,
+        })
 
-        mal_status = get_text("my_status")
-        our_status = MAL_TO_STATUS.get(mal_status, MediaStatus.planned)
+    # Batch-fetch all metadata from Shikimori (50 IDs per request)
+    external_ids = [item["external_id"] for item in parsed if item.get("external_id")]
+    metadata_map = await external_media_api.fetch_shikimori_batch(external_ids)
 
-        score_str = get_text("my_score")
-        rating = int(score_str) if score_str.isdigit() and 1 <= int(score_str) <= 10 else None
+    for item in parsed:
+        metadata = metadata_map.get(item.get("external_id") or "")
+        if metadata:
+            item["title"] = metadata.get("title") or item["title"]
+            item["cover_url"] = metadata.get("cover_url")
+            item["description"] = metadata.get("description")
+            item["genres"] = metadata.get("genres")
+            item["source_rating"] = metadata.get("source_rating")
+            item["year"] = metadata.get("year")
 
-        started_at = _parse_date(get_text("my_start_date"))
-        completed_at = _parse_date(get_text("my_finish_date"))
-        comment = get_text("my_comments") or None
+    imported = 0
+    skipped = 0
+    errors = []
 
-        cover_url = None
-        description = None
-        genres = None
-        source_rating = None
-        year = None
-
-        if external_id:
-            metadata = await external_media_api.get_metadata_by_external_id(
-                external_id, MediaType.anime
-            )
-            if metadata:
-                title = metadata.get("title") or title
-                cover_url = metadata.get("cover_url")
-                description = metadata.get("description")
-                genres = metadata.get("genres")
-                source_rating = metadata.get("source_rating")
-                year = metadata.get("year")
+    for item in parsed:
+        title = item["title"]
 
         existing = await db.execute(
             select(MediaListEntry).where(
@@ -158,17 +156,17 @@ async def import_anime_xml(
             user_id=user_id,
             media_type=MediaType.anime,
             title=title,
-            external_id=external_id,
-            status=our_status,
-            rating=rating,
-            started_at=started_at,
-            completed_at=completed_at,
-            comment=comment,
-            cover_url=cover_url,
-            description=description,
-            genres=genres,
-            source_rating=source_rating,
-            year=year,
+            external_id=item.get("external_id"),
+            status=item["status"],
+            rating=item["rating"],
+            started_at=item["started_at"],
+            completed_at=item["completed_at"],
+            comment=item["comment"],
+            cover_url=item.get("cover_url"),
+            description=item.get("description"),
+            genres=item.get("genres"),
+            source_rating=item.get("source_rating"),
+            year=item.get("year"),
             is_public=True,
         )
         try:
