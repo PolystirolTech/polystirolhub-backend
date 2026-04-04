@@ -100,6 +100,7 @@ class MediaListResponse(BaseModel):
     comment: Optional[str]
     is_favorite: bool
     is_public: bool
+    is_custom: bool
     started_at: Optional[date]
     completed_at: Optional[date]
     play_time_hours: Optional[float]

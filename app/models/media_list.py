@@ -40,6 +40,7 @@ class MediaListEntry(Base):
     comment = Column(Text, nullable=True)
     is_favorite = Column(Boolean, default=False, nullable=False)
     is_public = Column(Boolean, default=True, nullable=False)
+    is_custom = Column(Boolean, default=False, nullable=False)
 
     started_at = Column(Date, nullable=True)
     completed_at = Column(Date, nullable=True)  # Null for albums

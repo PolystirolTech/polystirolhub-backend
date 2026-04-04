@@ -47,7 +47,7 @@ async def create_entry(db: AsyncSession, user_id: UUID, data: MediaListCreate) -
 async def create_custom_entry(
     db: AsyncSession, user_id: UUID, data: MediaListCustomCreate
 ) -> MediaListEntry:
-    entry = MediaListEntry(user_id=user_id, **data.model_dump())
+    entry = MediaListEntry(user_id=user_id, is_custom=True, **data.model_dump())
     db.add(entry)
     try:
         await db.commit()
@@ -71,7 +71,11 @@ async def get_entry(db: AsyncSession, entry_id: UUID, user_id: UUID) -> Optional
 async def update_entry(
     db: AsyncSession, entry: MediaListEntry, data: MediaListUpdate
 ) -> MediaListEntry:
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    if not entry.is_custom:
+        updates.pop("title", None)
+        updates.pop("cover_url", None)
+    for field, value in updates.items():
         setattr(entry, field, value)
     try:
         await db.commit()
