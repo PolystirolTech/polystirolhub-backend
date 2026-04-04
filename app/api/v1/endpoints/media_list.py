@@ -1,13 +1,19 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+import os
+import uuid
+from pathlib import Path
+
+import aiofiles
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
+from app.core.config import settings
 from app.models.media_list import MediaStatus, MediaType
 from app.models.user import User
 from app.schemas.media_list import (
@@ -100,6 +106,33 @@ async def get_my_list(
     current_user: User = Depends(deps.get_current_user),
 ):
     return await svc.get_user_list(db, current_user.id, filters)
+
+
+@router.post("/covers/upload")
+async def upload_cover(
+    file: UploadFile = File(...),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Upload a cover image for a custom media entry. Returns the URL."""
+    ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    content_type = file.content_type or ""
+    if content_type not in ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, WebP and GIF images are allowed")
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image too large (max 5 MB)")
+
+    ext = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
+    filename = f"{uuid.uuid4().hex}{ext}"
+
+    upload_dir = Path(settings.STORAGE_LOCAL_PATH).parent / "media_covers"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    async with aiofiles.open(upload_dir / filename, "wb") as f:
+        await f.write(content)
+
+    return {"url": f"/static/media_covers/{filename}"}
 
 
 @router.post("/custom", response_model=MediaListResponse, status_code=status.HTTP_201_CREATED)
