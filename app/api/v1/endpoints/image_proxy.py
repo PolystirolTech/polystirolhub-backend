@@ -13,7 +13,9 @@ ALLOWED_HOSTS = {
     "api-cdn.myanimelist.net",
     # Shikimori
     "shikimori.one",
+    "shikimori.io",
     "dere.shikimori.one",
+    "kawai.shikimori.one",
     # TMDB
     "image.tmdb.org",
     # IGDB
