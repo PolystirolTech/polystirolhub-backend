@@ -79,6 +79,8 @@ async def create_entry(
 ):
     try:
         return await svc.create_entry(db, current_user.id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except IntegrityError:
         raise HTTPException(status_code=409, detail="Entry with this title and type already exists")
 

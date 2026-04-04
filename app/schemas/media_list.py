@@ -8,9 +8,7 @@ from app.models.media_list import MediaStatus, MediaType
 
 class MediaListCreate(BaseModel):
     media_type: MediaType
-    title: str = Field(..., min_length=1, max_length=500)
-    cover_url: Optional[str] = None
-    external_id: Optional[str] = None
+    external_id: str = Field(..., min_length=1, max_length=500)  # Required, from search results
     status: Optional[MediaStatus] = None
     rating: Optional[int] = Field(None, ge=1, le=10)
     comment: Optional[str] = None
@@ -19,10 +17,6 @@ class MediaListCreate(BaseModel):
     started_at: Optional[date] = None
     completed_at: Optional[date] = None
     play_time_hours: Optional[float] = Field(None, ge=0)
-    description: Optional[str] = None
-    genres: Optional[list[str]] = None
-    source_rating: Optional[float] = None
-    year: Optional[int] = None
 
     @field_validator("status")
     @classmethod
@@ -50,9 +44,6 @@ class MediaListCreate(BaseModel):
 
 
 class MediaListUpdate(BaseModel):
-    title: Optional[str] = Field(None, min_length=1, max_length=500)
-    cover_url: Optional[str] = None
-    external_id: Optional[str] = None
     status: Optional[MediaStatus] = None
     rating: Optional[int] = Field(None, ge=1, le=10)
     comment: Optional[str] = None
@@ -61,10 +52,6 @@ class MediaListUpdate(BaseModel):
     started_at: Optional[date] = None
     completed_at: Optional[date] = None
     play_time_hours: Optional[float] = Field(None, ge=0)
-    description: Optional[str] = None
-    genres: Optional[list[str]] = None
-    source_rating: Optional[float] = None
-    year: Optional[int] = None
 
 
 class MediaListResponse(BaseModel):

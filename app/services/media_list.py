@@ -13,7 +13,27 @@ logger = logging.getLogger(__name__)
 
 
 async def create_entry(db: AsyncSession, user_id: UUID, data: MediaListCreate) -> MediaListEntry:
-    entry = MediaListEntry(user_id=user_id, **data.model_dump())
+    """Create media list entry from search result (external_id required)"""
+    from app.services import external_media_api
+
+    # Get metadata from cache using external_id
+    metadata = await external_media_api.get_metadata_by_external_id(
+        data.external_id, data.media_type
+    )
+
+    if not metadata:
+        raise ValueError(f"Media with external_id {data.external_id} not found. Use search first.")
+
+    # Build entry with metadata from API
+    entry_data = data.model_dump(exclude_unset=True)
+    entry_data['title'] = metadata.get('title')
+    entry_data['description'] = metadata.get('description')
+    entry_data['genres'] = metadata.get('genres')
+    entry_data['source_rating'] = metadata.get('source_rating')
+    entry_data['year'] = metadata.get('year')
+    entry_data['cover_url'] = metadata.get('cover_url')
+
+    entry = MediaListEntry(user_id=user_id, **entry_data)
     db.add(entry)
     try:
         await db.commit()

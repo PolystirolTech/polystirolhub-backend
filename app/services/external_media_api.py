@@ -25,9 +25,28 @@ async def search_media(query: str, media_type: MediaType) -> list[dict]:
     return []
 
 
+async def get_metadata_by_external_id(external_id: str, media_type: MediaType) -> Optional[dict]:
+    """Get metadata from cache or API by external_id"""
+    cache_key = f"media_by_id:{media_type.value}:{external_id}"
+
+    # Try cache first
+    cached = await get_cache(cache_key)
+    if cached:
+        try:
+            import json
+            return json.loads(cached)
+        except Exception:
+            pass
+
+    # If not in cache, it wasn't found - return None
+    # (This prevents excessive API calls for non-existent IDs)
+    return None
+
+
 async def _search_with_cache(
     key: str,
     search_func,
+    media_type: MediaType,
 ) -> list[dict]:
     """Search with Redis caching"""
     cached = await get_cache(key)
@@ -42,7 +61,13 @@ async def _search_with_cache(
         results = await search_func()
         if results:
             import json
+            # Cache the full results list
             await set_cache(key, json.dumps(results), SEARCH_CACHE_TTL)
+            # Also cache each result individually by external_id for auto-fill
+            for result in results:
+                if result.get('external_id'):
+                    id_key = f"media_by_id:{media_type.value}:{result['external_id']}"
+                    await set_cache(id_key, json.dumps(result), SEARCH_CACHE_TTL)
         return results
     except Exception as e:
         logger.error(f"Search error for {key}: {e}")
@@ -93,13 +118,14 @@ async def _search_mal(query: str) -> list[dict]:
             logger.error(f"MAL search error: {e}")
             return []
 
-    return await _search_with_cache(cache_key, search)
+    return await _search_with_cache(cache_key, search, MediaType.anime)
 
 
 async def _search_tmdb(query: str, is_series: bool = False) -> list[dict]:
     """Search TMDB API for movies or series"""
     search_type = "series" if is_series else "movie"
     cache_key = f"media_search:{search_type}:{hashlib.md5(query.encode()).hexdigest()}"
+    media_type_enum = MediaType.series if is_series else MediaType.movie
 
     async def search():
         if not settings.TMDB_API_KEY:
@@ -146,7 +172,7 @@ async def _search_tmdb(query: str, is_series: bool = False) -> list[dict]:
             logger.error(f"TMDB search error: {e}")
             return []
 
-    return await _search_with_cache(cache_key, search)
+    return await _search_with_cache(cache_key, search, media_type_enum)
 
 
 async def _search_igdb(query: str) -> list[dict]:
@@ -233,10 +259,7 @@ async def _search_igdb(query: str) -> list[dict]:
             logger.error(f"IGDB search error: {e}")
             return []
 
-    return await _search_with_cache(cache_key, search)
-
-
-async def _search_lastfm(query: str) -> list[dict]:
+    return await _search_with_cache(cache_key, search, MediaType.game)
     """Search Last.fm API for albums"""
     cache_key = f"media_search:album:{hashlib.md5(query.encode()).hexdigest()}"
 
@@ -289,4 +312,4 @@ async def _search_lastfm(query: str) -> list[dict]:
             logger.error(f"Last.fm search error: {e}")
             return []
 
-    return await _search_with_cache(cache_key, search)
+    return await _search_with_cache(cache_key, search, MediaType.album)
