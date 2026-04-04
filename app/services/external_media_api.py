@@ -275,7 +275,7 @@ async def get_metadata_by_imdb_id(imdb_id: str, media_type: MediaType) -> Option
             pass
 
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
             response = await client.get(
                 f"https://api.themoviedb.org/3/find/{imdb_id}",
                 params={"api_key": settings.TMDB_API_KEY, "external_source": "imdb_id"},
@@ -285,8 +285,11 @@ async def get_metadata_by_imdb_id(imdb_id: str, media_type: MediaType) -> Option
                 logger.warning(f"TMDB find by IMDb ID {imdb_id} returned {response.status_code}")
                 return None
             data = response.json()
+    except httpx.TimeoutException:
+        logger.warning(f"TMDB find by IMDb ID {imdb_id} timed out")
+        return None
     except Exception as e:
-        logger.error(f"TMDB find by IMDb ID {imdb_id} error: {e}")
+        logger.error(f"TMDB find by IMDb ID {imdb_id} error: {e!r}")
         return None
 
     items = (
@@ -341,7 +344,7 @@ async def get_metadata_by_title_year(
 
     async def _search(params: dict) -> list:
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
                 response = await client.get(
                     "https://api.themoviedb.org/3/search/multi",
                     params={"api_key": settings.TMDB_API_KEY, **params},
@@ -349,13 +352,15 @@ async def get_metadata_by_title_year(
                 )
                 if response.status_code != 200:
                     return []
-                # Only keep movie and tv results
                 return [
                     r for r in response.json().get("results", [])
                     if r.get("media_type") in ("movie", "tv")
                 ]
+        except httpx.TimeoutException:
+            logger.warning(f"TMDB title search timed out for '{title}'")
+            return []
         except Exception as e:
-            logger.error(f"TMDB title search '{title}' error: {e}")
+            logger.error(f"TMDB title search '{title}' error: {e!r}")
             return []
 
     items = []
@@ -434,7 +439,7 @@ async def _search_mal(query: str) -> list[dict]:
             return []
 
         try:
-            logger.debug(f"Searching MAL for: {query}, Client-ID: {settings.MAL_CLIENT_ID[:10]}...")
+            logger.debug(f"Searching MAL for: {query}")
             async with httpx.AsyncClient(follow_redirects=True) as client:
                 response = await client.get(
                     "https://api.myanimelist.net/v2/anime",
@@ -447,8 +452,8 @@ async def _search_mal(query: str) -> list[dict]:
                     timeout=5,
                 )
                 if response.status_code != 200:
-                    logger.error(f"MAL API returned {response.status_code}: {response.text[:500]}")
-                response.raise_for_status()
+                    logger.warning(f"MAL search returned {response.status_code}")
+                    return []
                 data = response.json()
 
                 results = []
@@ -464,8 +469,11 @@ async def _search_mal(query: str) -> list[dict]:
                         "year": anime.get("start_season", {}).get("year"),
                     })
                 return results
+        except httpx.TimeoutException:
+            logger.warning(f"MAL search timed out for '{query}', falling back to Shikimori")
+            return []
         except Exception as e:
-            logger.error(f"MAL search error: {e}")
+            logger.error(f"MAL search error: {e!r}")
             return []
 
     return await _search_with_cache(cache_key, search, MediaType.anime)
@@ -484,15 +492,15 @@ async def _search_tmdb(query: str, is_series: bool = False) -> list[dict]:
 
         try:
             logger.debug(f"Searching TMDB for: {query}, is_series={is_series}")
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
                 response = await client.get(
                     "https://api.themoviedb.org/3/search/multi",
                     params={"api_key": settings.TMDB_API_KEY, "query": query},
                     timeout=10,
                 )
                 if response.status_code != 200:
-                    logger.error(f"TMDB API returned {response.status_code}: {response.text[:500]}")
-                response.raise_for_status()
+                    logger.warning(f"TMDB search returned {response.status_code}")
+                    return []
                 data = response.json()
 
                 results = []
@@ -513,13 +521,16 @@ async def _search_tmdb(query: str, is_series: bool = False) -> list[dict]:
                         "cover_url": poster_url,
                         "external_id": str(item.get("id")),
                         "description": item.get("overview"),
-                        "genres": [],  # TMDB multi-search doesn't include genres
+                        "genres": [],
                         "source_rating": item.get("vote_average"),
                         "year": int(item.get("release_date", "")[:4]) if item.get("release_date") else None,
                     })
                 return results
+        except httpx.TimeoutException:
+            logger.warning(f"TMDB search timed out for '{query}'")
+            return []
         except Exception as e:
-            logger.error(f"TMDB search error: {e}")
+            logger.error(f"TMDB search error: {e!r}")
             return []
 
     return await _search_with_cache(cache_key, search, media_type_enum)
@@ -545,7 +556,7 @@ async def _search_igdb(query: str) -> list[dict]:
             }
             logger.debug(f"Headers: {headers}")
 
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
                 response = await client.post(
                     "https://api.igdb.com/v4/games",
                     headers=headers,
@@ -553,8 +564,8 @@ async def _search_igdb(query: str) -> list[dict]:
                     timeout=10,
                 )
                 if response.status_code != 200:
-                    logger.error(f"IGDB API returned {response.status_code}: {response.text[:500]}")
-                response.raise_for_status()
+                    logger.warning(f"IGDB search returned {response.status_code}")
+                    return []
                 data = response.json()
 
                 results = []
@@ -607,8 +618,11 @@ async def _search_igdb(query: str) -> list[dict]:
                         "year": year,
                     })
                 return results
+        except httpx.TimeoutException:
+            logger.warning(f"IGDB search timed out for '{query}'")
+            return []
         except Exception as e:
-            logger.error(f"IGDB search error: {e}")
+            logger.error(f"IGDB search error: {e!r}")
             return []
 
     return await _search_with_cache(cache_key, search, MediaType.game)
@@ -625,7 +639,7 @@ async def _search_lastfm(query: str) -> list[dict]:
 
         try:
             logger.debug(f"Searching Last.fm for album: {query}")
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
                 response = await client.get(
                     "https://ws.audioscrobbler.com/2.0/",
                     params={
@@ -638,8 +652,8 @@ async def _search_lastfm(query: str) -> list[dict]:
                     timeout=10,
                 )
                 if response.status_code != 200:
-                    logger.error(f"Last.fm API returned {response.status_code}: {response.text[:500]}")
-                response.raise_for_status()
+                    logger.warning(f"Last.fm search returned {response.status_code}")
+                    return []
                 data = response.json()
 
                 results = []
@@ -669,8 +683,11 @@ async def _search_lastfm(query: str) -> list[dict]:
                         "year": None,
                     })
                 return results
+        except httpx.TimeoutException:
+            logger.warning(f"Last.fm search timed out for '{query}'")
+            return []
         except Exception as e:
-            logger.error(f"Last.fm search error: {e}")
+            logger.error(f"Last.fm search error: {e!r}")
             return []
 
     return await _search_with_cache(cache_key, search, MediaType.album)
