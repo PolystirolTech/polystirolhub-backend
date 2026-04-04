@@ -274,16 +274,35 @@ async def toggle_favorite(
 
 # --- Public endpoints ---
 
+async def _get_user_or_404(username: str, db: AsyncSession):
+    result = await db.execute(select(User).where(User.username == username))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@router.get("/users/{username}/stats", response_model=MediaListStats)
+async def get_public_stats(
+    username: str,
+    media_type: Optional[str] = Query(None),
+    db: AsyncSession = Depends(deps.get_db),
+):
+    user = await _get_user_or_404(username, db)
+    media_type_enum = None
+    if media_type:
+        try:
+            media_type_enum = MediaType(media_type)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid media_type: {media_type}")
+    return await svc.get_stats(db, user.id, media_type_enum, public_only=True)
+
+
 @router.get("/users/{username}", response_model=list[MediaListResponse])
 async def get_public_list(
     username: str,
     filters: MediaListFilters = Depends(_filters_from_query),
     db: AsyncSession = Depends(deps.get_db),
 ):
-    result = await db.execute(
-        select(User).where(User.username == username)
-    )
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = await _get_user_or_404(username, db)
     return await svc.get_user_list(db, user.id, filters, public_only=True)

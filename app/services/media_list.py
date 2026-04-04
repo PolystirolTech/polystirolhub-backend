@@ -134,6 +134,7 @@ async def get_stats(
     db: AsyncSession,
     user_id: UUID,
     media_type: Optional[MediaType] = None,
+    public_only: bool = False,
 ) -> MediaListStats:
     query = (
         select(MediaListEntry.status, func.count().label("cnt"))
@@ -142,6 +143,8 @@ async def get_stats(
     )
     if media_type is not None:
         query = query.where(MediaListEntry.media_type == media_type)
+    if public_only:
+        query = query.where(MediaListEntry.is_public)
 
     result = await db.execute(query)
     rows = result.all()
