@@ -29,7 +29,6 @@ async def get_metadata_by_external_id(external_id: str, media_type: MediaType) -
     """Get metadata from cache or API by external_id"""
     cache_key = f"media_by_id:{media_type.value}:{external_id}"
 
-    # Try cache first
     cached = await get_cache(cache_key)
     if cached:
         try:
@@ -38,9 +37,49 @@ async def get_metadata_by_external_id(external_id: str, media_type: MediaType) -
         except Exception:
             pass
 
-    # If not in cache, it wasn't found - return None
-    # (This prevents excessive API calls for non-existent IDs)
+    # Cache miss — fetch from API
+    if media_type == MediaType.anime:
+        return await _fetch_mal_by_id(external_id)
+
     return None
+
+
+async def _fetch_mal_by_id(external_id: str) -> Optional[dict]:
+    """Fetch anime metadata from MAL API by ID and cache it"""
+    if not settings.MAL_CLIENT_ID:
+        return None
+
+    cache_key = f"media_by_id:{MediaType.anime.value}:{external_id}"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.myanimelist.net/v2/anime/{external_id}",
+                params={"fields": "id,title,main_picture,synopsis,genres,mean,start_season"},
+                headers={"X-MAL-CLIENT-ID": settings.MAL_CLIENT_ID},
+                timeout=10,
+            )
+            if response.status_code != 200:
+                logger.warning(f"MAL fetch by ID {external_id} returned {response.status_code}")
+                return None
+            anime = response.json()
+    except Exception as e:
+        logger.error(f"MAL fetch by ID {external_id} error: {e}")
+        return None
+
+    result = {
+        "title": anime.get("title"),
+        "cover_url": anime.get("main_picture", {}).get("large"),
+        "external_id": str(anime.get("id")),
+        "description": anime.get("synopsis"),
+        "genres": [g.get("name") for g in anime.get("genres", [])],
+        "source_rating": anime.get("mean"),
+        "year": anime.get("start_season", {}).get("year"),
+    }
+
+    import json
+    await set_cache(cache_key, json.dumps(result), SEARCH_CACHE_TTL)
+    return result
 
 
 async def _search_with_cache(

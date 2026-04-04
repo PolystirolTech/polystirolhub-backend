@@ -1,7 +1,8 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from app.schemas.media_list import (
 )
 from app.services import media_list as svc
 from app.services import external_media_api as ext_svc
+from app.services import anime_xml as xml_svc
 
 router = APIRouter()
 
@@ -92,6 +94,39 @@ async def get_my_list(
     current_user: User = Depends(deps.get_current_user),
 ):
     return await svc.get_user_list(db, current_user.id, filters)
+
+
+@router.get("/anime/export")
+async def export_anime(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Export anime list in MAL/Shikimori XML format"""
+    xml_content = await xml_svc.export_anime_xml(db, current_user.id, current_user.username)
+    return Response(
+        content=xml_content,
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="animelist_{current_user.username}.xml"'},
+    )
+
+
+@router.post("/anime/import")
+async def import_anime(
+    file: UploadFile,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Import anime list from MAL/Shikimori XML file"""
+    if not file.filename or not file.filename.lower().endswith(".xml"):
+        raise HTTPException(status_code=400, detail="File must be an XML file")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:  # 10 MB limit
+        raise HTTPException(status_code=400, detail="File too large (max 10 MB)")
+    try:
+        result = await xml_svc.import_anime_xml(db, current_user.id, content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
 
 
 @router.get("/{entry_id}", response_model=MediaListResponse)
