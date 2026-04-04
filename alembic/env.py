@@ -29,6 +29,7 @@ from app.models.goldsource_statistics import (  # noqa: E402, F401
 )
 from app.models.resource_collection import ResourceGoal, ResourceProgress  # noqa: E402, F401
 from app.models.shop import ShopCategory, ShopItem, ShopOrder  # noqa: E402, F401
+from app.models.media_list import MediaListEntry  # noqa: E402, F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

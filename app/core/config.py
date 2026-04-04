@@ -38,6 +38,14 @@ class Settings(BaseSettings):
 	STEAM_CLIENT_ID: str = ""  # Опционально, для совместимости
 	STEAM_API_KEY: str = ""
 
+	# External Media APIs
+	MAL_CLIENT_ID: str = ""
+	TMDB_API_KEY: str = ""
+	IGDB_CLIENT_ID: str = ""
+	IGDB_ACCESS_TOKEN: str = ""
+	LASTFM_API_KEY: str = ""
+	EXTERNAL_API_CACHE_TTL: int = 86400  # 24 hours
+
 	# Frontend
 	FRONTEND_URL: str = "http://localhost:3000"
 	

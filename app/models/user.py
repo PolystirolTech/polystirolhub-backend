@@ -29,6 +29,7 @@ class User(Base):
 	notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
 	activities = relationship("Activity", back_populates="user", cascade="all, delete-orphan")
 	user_counters = relationship("UserCounter", back_populates="user", cascade="all, delete-orphan")
+	media_list = relationship("MediaListEntry", back_populates="user", cascade="all, delete-orphan")
 	selected_badge_id = Column(UUID(as_uuid=True), ForeignKey("badges.id"), nullable=True)
 
 class OAuthAccount(Base):
