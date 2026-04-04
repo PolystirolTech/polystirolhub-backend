@@ -82,6 +82,139 @@ async def _fetch_mal_by_id(external_id: str) -> Optional[dict]:
     return result
 
 
+async def get_metadata_by_imdb_id(imdb_id: str, media_type: MediaType) -> Optional[dict]:
+    """Fetch TMDB metadata by IMDb ID (tt...) and cache it"""
+    if not settings.TMDB_API_KEY:
+        return None
+
+    cache_key = f"media_by_imdb:{media_type.value}:{imdb_id}"
+
+    cached = await get_cache(cache_key)
+    if cached:
+        try:
+            import json
+            return json.loads(cached)
+        except Exception:
+            pass
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.themoviedb.org/3/find/{imdb_id}",
+                params={"api_key": settings.TMDB_API_KEY, "external_source": "imdb_id"},
+                timeout=10,
+            )
+            if response.status_code != 200:
+                logger.warning(f"TMDB find by IMDb ID {imdb_id} returned {response.status_code}")
+                return None
+            data = response.json()
+    except Exception as e:
+        logger.error(f"TMDB find by IMDb ID {imdb_id} error: {e}")
+        return None
+
+    items = (
+        data.get("tv_results", [])
+        if media_type == MediaType.series
+        else data.get("movie_results", [])
+    )
+    if not items:
+        items = data.get("movie_results", []) + data.get("tv_results", [])
+    if not items:
+        return None
+
+    item = items[0]
+    poster_path = item.get("poster_path")
+    title = item.get("title") or item.get("name")
+    date_raw = item.get("release_date") or item.get("first_air_date") or ""
+
+    result = {
+        "title": title,
+        "cover_url": f"https://image.tmdb.org/t/p/w342{poster_path}" if poster_path else None,
+        "external_id": imdb_id,
+        "description": item.get("overview"),
+        "genres": [],
+        "source_rating": item.get("vote_average"),
+        "year": int(date_raw[:4]) if len(date_raw) >= 4 else None,
+    }
+
+    import json
+    await set_cache(cache_key, json.dumps(result), SEARCH_CACHE_TTL)
+    return result
+
+
+async def get_metadata_by_title_year(
+    title: str, year: Optional[int]
+) -> Optional[dict]:
+    """Search TMDB by title+year using multi-search, returns media_type in result"""
+    if not settings.TMDB_API_KEY:
+        return None
+
+    import hashlib as _hashlib
+    cache_key = f"media_by_title:{_hashlib.md5(f'{title}:{year}'.lower().encode()).hexdigest()}"
+
+    cached = await get_cache(cache_key)
+    if cached:
+        try:
+            import json
+            parsed = json.loads(cached)
+            if parsed:
+                return parsed
+        except Exception:
+            pass
+
+    async def _search(params: dict) -> list:
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://api.themoviedb.org/3/search/multi",
+                    params={"api_key": settings.TMDB_API_KEY, **params},
+                    timeout=10,
+                )
+                if response.status_code != 200:
+                    return []
+                # Only keep movie and tv results
+                return [
+                    r for r in response.json().get("results", [])
+                    if r.get("media_type") in ("movie", "tv")
+                ]
+        except Exception as e:
+            logger.error(f"TMDB title search '{title}' error: {e}")
+            return []
+
+    items = []
+    if year:
+        items = await _search({"query": title, "year": year})
+        if not items:
+            items = await _search({"query": title, "year": year - 1})
+        if not items:
+            items = await _search({"query": title, "year": year + 1})
+    if not items:
+        items = await _search({"query": title})
+
+    if not items:
+        return None
+
+    item = items[0]
+    tmdb_media_type = item.get("media_type")
+    poster_path = item.get("poster_path")
+    date_raw = item.get("release_date") or item.get("first_air_date") or ""
+
+    result = {
+        "title": item.get("title") or item.get("name") or title,
+        "cover_url": f"https://image.tmdb.org/t/p/w342{poster_path}" if poster_path else None,
+        "external_id": str(item.get("id")),
+        "description": item.get("overview"),
+        "genres": [],
+        "source_rating": item.get("vote_average"),
+        "year": int(date_raw[:4]) if len(date_raw) >= 4 else year,
+        "media_type": (MediaType.series if tmdb_media_type == "tv" else MediaType.movie).value,
+    }
+
+    import json
+    await set_cache(cache_key, json.dumps(result), SEARCH_CACHE_TTL)
+    return result
+
+
 async def _search_with_cache(
     key: str,
     search_func,

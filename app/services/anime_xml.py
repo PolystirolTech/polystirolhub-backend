@@ -125,17 +125,6 @@ async def import_anime_xml(
         completed_at = _parse_date(get_text("my_finish_date"))
         comment = get_text("my_comments") or None
 
-        existing = await db.execute(
-            select(MediaListEntry).where(
-                MediaListEntry.user_id == user_id,
-                MediaListEntry.media_type == MediaType.anime,
-                MediaListEntry.title == title,
-            )
-        )
-        if existing.scalar_one_or_none():
-            skipped += 1
-            continue
-
         cover_url = None
         description = None
         genres = None
@@ -154,6 +143,17 @@ async def import_anime_xml(
                 source_rating = metadata.get("source_rating")
                 year = metadata.get("year")
 
+        existing = await db.execute(
+            select(MediaListEntry).where(
+                MediaListEntry.user_id == user_id,
+                MediaListEntry.media_type == MediaType.anime,
+                MediaListEntry.title == title,
+            )
+        )
+        if existing.scalar_one_or_none():
+            skipped += 1
+            continue
+
         entry = MediaListEntry(
             user_id=user_id,
             media_type=MediaType.anime,
@@ -171,12 +171,12 @@ async def import_anime_xml(
             year=year,
             is_public=True,
         )
-        db.add(entry)
         try:
-            await db.flush()
+            async with db.begin_nested():
+                db.add(entry)
+                await db.flush()
             imported += 1
         except Exception as e:
-            await db.rollback()
             errors.append(f"{title}: {e}")
             skipped += 1
 

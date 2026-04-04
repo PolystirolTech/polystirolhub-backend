@@ -21,6 +21,8 @@ from app.schemas.media_list import (
 from app.services import media_list as svc
 from app.services import external_media_api as ext_svc
 from app.services import anime_xml as xml_svc
+from app.services import letterboxd_import as lb_svc
+from app.services import imdb_import as imdb_svc
 
 router = APIRouter()
 
@@ -113,6 +115,60 @@ async def get_stats(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid media_type: {media_type}")
     return await svc.get_stats(db, current_user.id, media_type_enum)
+
+
+@router.post("/import/letterboxd")
+async def import_letterboxd(
+    file: UploadFile,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Import watched/watchlist from Letterboxd ZIP export"""
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="File must be a ZIP archive")
+    content = await file.read()
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 20 MB)")
+    try:
+        return await lb_svc.import_letterboxd_zip(db, current_user.id, content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/import/imdb/ratings")
+async def import_imdb_ratings(
+    file: UploadFile,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Import rated movies/series from IMDb ratings CSV export"""
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="File must be a CSV file")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 10 MB)")
+    try:
+        return await imdb_svc.import_imdb_ratings(db, current_user.id, content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/import/imdb/watchlist")
+async def import_imdb_watchlist(
+    file: UploadFile,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Import watchlist from IMDb watchlist CSV export"""
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="File must be a CSV file")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 10 MB)")
+    try:
+        return await imdb_svc.import_imdb_watchlist(db, current_user.id, content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/anime/export")
