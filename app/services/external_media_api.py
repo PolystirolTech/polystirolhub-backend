@@ -342,41 +342,39 @@ async def get_metadata_by_title_year(
         except Exception:
             pass
 
-    async def _search(params: dict) -> list:
-        try:
-            async with httpx.AsyncClient(follow_redirects=True) as client:
-                response = await client.get(
-                    "https://api.themoviedb.org/3/search/multi",
-                    params={"api_key": settings.TMDB_API_KEY, **params},
-                    timeout=10,
-                )
-                if response.status_code != 200:
-                    return []
-                return [
-                    r for r in response.json().get("results", [])
-                    if r.get("media_type") in ("movie", "tv")
-                ]
-        except httpx.TimeoutException:
-            logger.warning(f"TMDB title search timed out for '{title}'")
-            return []
-        except Exception as e:
-            logger.error(f"TMDB title search '{title}' error: {e!r}")
-            return []
-
-    items = []
-    if year:
-        items = await _search({"query": title, "year": year})
-        if not items:
-            items = await _search({"query": title, "year": year - 1})
-        if not items:
-            items = await _search({"query": title, "year": year + 1})
-    if not items:
-        items = await _search({"query": title})
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            response = await client.get(
+                "https://api.themoviedb.org/3/search/multi",
+                params={"api_key": settings.TMDB_API_KEY, "query": title},
+                timeout=10,
+            )
+            if response.status_code != 200:
+                return None
+            items = [
+                r for r in response.json().get("results", [])
+                if r.get("media_type") in ("movie", "tv")
+            ]
+    except httpx.TimeoutException:
+        logger.warning(f"TMDB title search timed out for '{title}'")
+        return None
+    except Exception as e:
+        logger.error(f"TMDB title search '{title}' error: {e!r}")
+        return None
 
     if not items:
         return None
 
-    item = items[0]
+    def _year_diff(item: dict) -> int:
+        if not year:
+            return 0
+        date_raw = item.get("release_date") or item.get("first_air_date") or ""
+        try:
+            return abs(int(date_raw[:4]) - year) if len(date_raw) >= 4 else 9999
+        except ValueError:
+            return 9999
+
+    item = min(items, key=_year_diff)
     tmdb_media_type = item.get("media_type")
     poster_path = item.get("poster_path")
     date_raw = item.get("release_date") or item.get("first_air_date") or ""
