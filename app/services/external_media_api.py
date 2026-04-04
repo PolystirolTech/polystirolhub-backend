@@ -53,7 +53,9 @@ async def _search_with_cache(
     if cached:
         try:
             import json
-            return json.loads(cached)
+            parsed = json.loads(cached)
+            if parsed:
+                return parsed
         except Exception:
             pass
 
@@ -65,9 +67,8 @@ async def _search_with_cache(
             await set_cache(key, json.dumps(results), SEARCH_CACHE_TTL)
             # Also cache each result individually by external_id for auto-fill
             for result in results:
-                if result.get('external_id'):
-                    id_key = f"media_by_id:{media_type.value}:{result['external_id']}"
-                    await set_cache(id_key, json.dumps(result), SEARCH_CACHE_TTL)
+                id_key = f"media_by_id:{media_type.value}:{result['external_id']}"
+                await set_cache(id_key, json.dumps(result), SEARCH_CACHE_TTL)
         return results
     except Exception as e:
         logger.error(f"Search error for {key}: {e}")
@@ -214,13 +215,15 @@ async def _search_igdb(query: str) -> list[dict]:
                     cover_url = None
                     cover = game.get("cover")
                     if cover:
-                        # cover может быть числом (ID) или объектом
                         if isinstance(cover, dict):
-                            cover_id = cover.get("id")
-                        else:
-                            cover_id = cover
-                        if cover_id:
-                            cover_url = f"https://images.igdb.com/igdb/image/upload/t_cover_big/{cover_id}.jpg"
+                            url = cover.get("url")
+                            if url:
+                                # IGDB returns protocol-relative URLs like //images.igdb.com/...
+                                cover_url = url if url.startswith("http") else f"https:{url}"
+                                # Upgrade thumbnail to cover_big if needed
+                                cover_url = cover_url.replace("/t_thumb/", "/t_cover_big/")
+                            elif cover.get("id"):
+                                cover_url = f"https://images.igdb.com/igdb/image/upload/t_cover_big/{cover.get('id')}.jpg"
 
                     year = None
                     first_release_date = game.get("first_release_date")
@@ -260,6 +263,9 @@ async def _search_igdb(query: str) -> list[dict]:
             return []
 
     return await _search_with_cache(cache_key, search, MediaType.game)
+
+
+async def _search_lastfm(query: str) -> list[dict]:
     """Search Last.fm API for albums"""
     cache_key = f"media_search:album:{hashlib.md5(query.encode()).hexdigest()}"
 
@@ -298,10 +304,16 @@ async def _search_igdb(query: str) -> list[dict]:
                                 cover_url = img.get("#text")
                                 break
 
+                    mbid = album.get("mbid")
+                    if not mbid:
+                        artist = album.get("artist", "")
+                        name = album.get("name", "")
+                        mbid = f"lastfm:{hashlib.md5(f'{artist}:{name}'.lower().encode()).hexdigest()}"
+
                     results.append({
                         "title": f"{album.get('name')} - {album.get('artist')}",
                         "cover_url": cover_url,
-                        "external_id": album.get("mbid"),
+                        "external_id": mbid,
                         "description": None,
                         "genres": [],
                         "source_rating": None,
