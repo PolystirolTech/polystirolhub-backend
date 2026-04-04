@@ -130,6 +130,79 @@ async def get_user_list(
     return list(result.scalars().all())
 
 
+async def enrich_metadata(
+    db: AsyncSession,
+    media_type: Optional[MediaType] = None,
+) -> dict:
+    """Fetch and fill missing metadata for ALL entries that have external_id but no cover/description"""
+    from app.services import external_media_api
+
+    query = select(MediaListEntry).where(
+        MediaListEntry.external_id.isnot(None),
+        MediaListEntry.cover_url.is_(None),
+    )
+    if media_type:
+        query = query.where(MediaListEntry.media_type == media_type)
+
+    result = await db.execute(query)
+    entries = list(result.scalars().all())
+
+    if not entries:
+        return {"updated": 0, "skipped": 0}
+
+    updated = 0
+    skipped = 0
+
+    # Batch fetch for anime via Shikimori
+    anime_entries = [e for e in entries if e.media_type == MediaType.anime]
+    other_entries = [e for e in entries if e.media_type != MediaType.anime]
+
+    if anime_entries:
+        ids = [e.external_id for e in anime_entries]
+        metadata_map = await external_media_api.fetch_shikimori_batch(ids)
+        for entry in anime_entries:
+            metadata = metadata_map.get(entry.external_id)
+            if metadata:
+                entry.cover_url = metadata.get("cover_url") or entry.cover_url
+                entry.description = metadata.get("description") or entry.description
+                entry.genres = metadata.get("genres") or entry.genres
+                entry.source_rating = metadata.get("source_rating") or entry.source_rating
+                entry.year = metadata.get("year") or entry.year
+                updated += 1
+            else:
+                skipped += 1
+
+    for entry in other_entries:
+        metadata = None
+        if entry.media_type in (MediaType.movie, MediaType.series):
+            # IMDb ID (tt...) or TMDB ID
+            if entry.external_id and entry.external_id.startswith("tt"):
+                metadata = await external_media_api.get_metadata_by_imdb_id(
+                    entry.external_id, entry.media_type
+                )
+            elif entry.title and entry.year:
+                metadata = await external_media_api.get_metadata_by_title_year(
+                    entry.title, entry.year
+                )
+        elif entry.media_type == MediaType.anime:
+            metadata = await external_media_api.get_metadata_by_external_id(
+                entry.external_id, MediaType.anime
+            )
+
+        if metadata:
+            entry.cover_url = metadata.get("cover_url") or entry.cover_url
+            entry.description = metadata.get("description") or entry.description
+            entry.genres = metadata.get("genres") or entry.genres
+            entry.source_rating = metadata.get("source_rating") or entry.source_rating
+            entry.year = metadata.get("year") or entry.year
+            updated += 1
+        else:
+            skipped += 1
+
+    await db.commit()
+    return {"updated": updated, "skipped": skipped}
+
+
 async def get_stats(
     db: AsyncSession,
     user_id: UUID,

@@ -150,6 +150,22 @@ async def create_custom_entry(
         raise HTTPException(status_code=409, detail="Entry with this title and type already exists")
 
 
+@router.post("/enrich")
+async def enrich_metadata(
+    media_type: Optional[str] = Query(None),
+    db: AsyncSession = Depends(deps.get_db),
+    _: User = Depends(deps.get_current_super_admin),
+):
+    """Super admin only: fill missing metadata for ALL users' entries"""
+    media_type_enum = None
+    if media_type:
+        try:
+            media_type_enum = MediaType(media_type)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid media_type: {media_type}")
+    return await svc.enrich_metadata(db, media_type_enum)
+
+
 @router.get("/stats", response_model=MediaListStats)
 async def get_stats(
     media_type: Optional[str] = Query(None),
