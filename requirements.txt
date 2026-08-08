@@ -11,7 +11,7 @@ python-multipart
 httpx
 pytest
 pytest-asyncio
-ruff
+ruff==0.15.0
 email-validator
 itsdangerous
 mcstatus
